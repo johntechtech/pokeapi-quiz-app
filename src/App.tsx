@@ -2,6 +2,7 @@ import {
   ArrowClockwise,
   BookOpen,
   Brain,
+  CaretDown,
   CheckCircle,
   House,
   Eye,
@@ -37,6 +38,16 @@ type GameStatus = "idle" | "loading" | "playing" | "answered" | "finished" | "er
 type Notice = { tone: "success" | "error" | "info"; text: string } | null;
 type LastAnswer = { correct: boolean; score: number; answer: string };
 type IconComponent = React.ComponentType<IconProps>;
+type HomeModePokemon = { id: number; name: string; type: string; note: string };
+type GenerationId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+interface GenerationOption {
+  id: GenerationId;
+  label: string;
+  games: string;
+  start: number;
+  end: number;
+}
 
 const difficultyIcons: Record<Difficulty, IconComponent> = {
   kids: BookOpen,
@@ -53,6 +64,74 @@ const difficultyAccents: Record<Difficulty, string> = {
 };
 
 const difficultyOrder: Difficulty[] = ["kids", "adult", "professor", "trainer"];
+
+const generationOptions: GenerationOption[] = [
+  { id: 1, label: "第1世代", games: "赤・緑、青、ピカチュウ", start: 1, end: 151 },
+  { id: 2, label: "第2世代", games: "金・銀、クリスタル", start: 152, end: 251 },
+  { id: 3, label: "第3世代", games: "ルビー・サファイア、エメラルド", start: 252, end: 386 },
+  { id: 4, label: "第4世代", games: "ダイヤモンド・パール、プラチナ", start: 387, end: 493 },
+  { id: 5, label: "第5世代", games: "ブラック・ホワイト、ブラック2・ホワイト2", start: 494, end: 649 },
+  { id: 6, label: "第6世代", games: "X・Y", start: 650, end: 721 },
+  { id: 7, label: "第7世代", games: "サン・ムーン、ウルトラサン・ウルトラムーン", start: 722, end: 809 },
+  { id: 8, label: "第8世代", games: "ソード・シールド、LEGENDS アルセウス", start: 810, end: 905 },
+  { id: 9, label: "第9世代", games: "スカーレット・バイオレット", start: 906, end: 1025 },
+];
+
+const allGenerationIds = generationOptions.map((generation) => generation.id);
+
+const modePokemonPools: Record<Difficulty, HomeModePokemon[]> = {
+  kids: [
+    { id: 25, name: "ピカチュウ", type: "でんき", note: "見た目で答えやすい" },
+    { id: 133, name: "イーブイ", type: "ノーマル", note: "親しみやすい人気ポケモン" },
+    { id: 7, name: "ゼニガメ", type: "みず", note: "シルエットが分かりやすい" },
+  ],
+  adult: [
+    { id: 94, name: "ゲンガー", type: "ゴースト / どく", note: "タイプ推理向き" },
+    { id: 448, name: "ルカリオ", type: "かくとう / はがね", note: "姿とタイプの手がかりが強い" },
+    { id: 658, name: "ゲッコウガ", type: "みず / あく", note: "特徴から絞り込みやすい" },
+  ],
+  professor: [
+    { id: 151, name: "ミュウ", type: "エスパー", note: "図鑑知識で差が出る" },
+    { id: 201, name: "アンノーン", type: "エスパー", note: "分類や説明が手がかり" },
+    { id: 474, name: "ポリゴンZ", type: "ノーマル", note: "設定を読むほど有利" },
+  ],
+  trainer: [
+    { id: 149, name: "カイリュー", type: "ドラゴン / ひこう", note: "バトル知識向き" },
+    { id: 445, name: "ガブリアス", type: "ドラゴン / じめん", note: "相性推理が楽しい" },
+    { id: 6, name: "リザードン", type: "ほのお / ひこう", note: "弱点と耐性が鍵" },
+  ],
+};
+
+function officialArtworkUrl(id: number): string {
+  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
+}
+
+function pickModePokemon(): Record<Difficulty, HomeModePokemon> {
+  return difficultyOrder.reduce((result, difficulty) => {
+    const pool = modePokemonPools[difficulty];
+    result[difficulty] = pool[Math.floor(Math.random() * pool.length)];
+    return result;
+  }, {} as Record<Difficulty, HomeModePokemon>);
+}
+
+function countGenerationPokemon(generation: GenerationOption): number {
+  return generation.end - generation.start + 1;
+}
+
+function speciesIdsForGenerations(selectedIds: GenerationId[]): number[] {
+  const selected = new Set(selectedIds);
+
+  return generationOptions.flatMap((generation) => {
+    if (!selected.has(generation.id)) {
+      return [];
+    }
+
+    return Array.from(
+      { length: countGenerationPokemon(generation) },
+      (_, index) => generation.start + index,
+    );
+  });
+}
 
 function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(" ");
@@ -141,20 +220,23 @@ function IconButton({
 function DifficultySelector({
   selected,
   onSelect,
+  modePokemon,
 }: {
-  selected: Difficulty;
+  selected: Difficulty | null;
   onSelect: (difficulty: Difficulty) => void;
+  modePokemon: Record<Difficulty, HomeModePokemon>;
 }): ReactElement {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {difficultyOrder.map((difficulty) => {
         const Icon = difficultyIcons[difficulty];
         const active = selected === difficulty;
+        const pokemon = modePokemon[difficulty];
 
         return (
           <button
             className={cx(
-              "group min-h-36 rounded-[1.5rem] border p-5 text-left transition duration-200 active:translate-y-[1px]",
+              "group min-h-44 overflow-hidden rounded-[1.5rem] border p-5 text-left transition duration-200 active:translate-y-[1px]",
               active ? difficultyAccents[difficulty] : "border-stone-200 bg-white hover:border-stone-400",
             )}
             key={difficulty}
@@ -182,10 +264,80 @@ function DifficultySelector({
             <p className="mt-5 max-w-[26ch] text-sm leading-6 text-stone-600">
               {difficultyDescriptions[difficulty]}
             </p>
+            <div className="mode-pokemon">
+              <div className="mode-pokemon-copy">
+                <p>{pokemon.note}</p>
+                <strong>{pokemon.name}</strong>
+                <span>{pokemon.type}</span>
+              </div>
+              <img
+                alt={`${difficultyLabels[difficulty]}モードにおすすめの${pokemon.name}`}
+                draggable={false}
+                src={officialArtworkUrl(pokemon.id)}
+              />
+            </div>
           </button>
         );
       })}
     </div>
+  );
+}
+
+function GenerationSelector({
+  isOpen,
+  selectedIds,
+  onToggle,
+  onToggleOpen,
+}: {
+  isOpen: boolean;
+  selectedIds: GenerationId[];
+  onToggle: (generationId: GenerationId) => void;
+  onToggleOpen: () => void;
+}): ReactElement {
+  const selected = new Set(selectedIds);
+
+  return (
+    <section className="generation-selector" aria-labelledby="generation-selector-title">
+      <button
+        aria-controls="generation-options"
+        aria-expanded={isOpen}
+        className="generation-accordion-button"
+        id="generation-selector-title"
+        onClick={onToggleOpen}
+        type="button"
+      >
+        <span>
+          <strong>出題範囲をカスタマイズ</strong>
+          <small>世代を複数選択できます</small>
+        </span>
+        <CaretDown aria-hidden className="generation-accordion-icon" size={20} weight="bold" />
+      </button>
+
+      {isOpen && (
+        <div className="generation-options" id="generation-options">
+          {generationOptions.map((generation) => {
+            const checked = selected.has(generation.id);
+
+            return (
+              <label className={cx("generation-option", checked && "is-active")} key={generation.id}>
+                <input
+                  checked={checked}
+                  onChange={() => onToggle(generation.id)}
+                  type="checkbox"
+                />
+                <span className="generation-option-box" aria-hidden="true" />
+                <span className="generation-option-text">
+                  <strong>
+                    {generation.label}：{generation.games}
+                  </strong>
+                  <span>{countGenerationPokemon(generation)}匹</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -194,7 +346,7 @@ function RankingPanel({
   difficulty,
 }: {
   entries: RankingEntry[];
-  difficulty: Difficulty;
+  difficulty: Difficulty | null;
 }): ReactElement {
   return (
     <Panel className="p-5">
@@ -202,7 +354,7 @@ function RankingPanel({
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">RANKING</p>
           <h2 className="mt-1 text-lg font-black text-stone-950">
-            {difficultyLabels[difficulty]} トップ10
+            {difficulty ? `${difficultyLabels[difficulty]} トップ10` : "ランキング"}
           </h2>
         </div>
         <Trophy aria-hidden className="text-[#d0a331]" size={26} weight="bold" />
@@ -210,7 +362,7 @@ function RankingPanel({
 
       {entries.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-4 py-6 text-sm text-stone-500">
-          まだ記録がありません。
+          {difficulty ? "まだ記録がありません。" : "モードを選ぶとランキングを表示します。"}
         </div>
       ) : (
         <ol className="divide-y divide-stone-100">
@@ -429,7 +581,7 @@ function ScoreGauge({ score }: { score: number }): ReactElement {
 }
 
 export default function App(): ReactElement {
-  const [difficulty, setDifficulty] = useState<Difficulty>("kids");
+  const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [status, setStatus] = useState<GameStatus>("idle");
   const [round, setRound] = useState<QuizRound | null>(null);
   const [questionNumber, setQuestionNumber] = useState(0);
@@ -444,13 +596,25 @@ export default function App(): ReactElement {
   const [saved, setSaved] = useState(false);
   const [rankings, setRankings] = useState(loadRankings);
   const [lastAnswer, setLastAnswer] = useState<LastAnswer | null>(null);
+  const [modePokemon, setModePokemon] = useState(pickModePokemon);
+  const [selectedGenerationIds, setSelectedGenerationIds] = useState<GenerationId[]>(allGenerationIds);
+  const [generationAccordionOpen, setGenerationAccordionOpen] = useState(false);
 
   const currentClues = useMemo(() => (round ? visibleClues(round) : []), [round]);
+  const candidateSpeciesIds = useMemo(
+    () => speciesIdsForGenerations(selectedGenerationIds),
+    [selectedGenerationIds],
+  );
   const elapsedMs = finishedAt && startedAt ? finishedAt - startedAt : 0;
-  const activeRanking = rankings[difficulty] ?? [];
-  const isQuizActive = (status === "playing" || status === "answered") && round !== null;
+  const activeRanking = difficulty ? rankings[difficulty] ?? [] : [];
+  const isQuizActive = (status === "playing" || status === "answered") && round !== null && difficulty !== null;
+  const canStartGame = Boolean(difficulty) && candidateSpeciesIds.length > 0;
 
   async function prepareRound(nextQuestionNumber: number, excludedIds: number[]) {
+    if (!difficulty || candidateSpeciesIds.length === 0) {
+      return;
+    }
+
     setStatus("loading");
     setNotice(null);
     setAnswer("");
@@ -459,6 +623,7 @@ export default function App(): ReactElement {
 
     try {
       const pokemon = await fetchRandomPokemonQuizData(excludedIds, {
+        candidateSpeciesIds,
         includeProfessorData: difficulty === "professor",
         includeBattleData: difficulty === "trainer",
       });
@@ -477,6 +642,10 @@ export default function App(): ReactElement {
   }
 
   function startGame() {
+    if (!canStartGame) {
+      return;
+    }
+
     setTotalScore(0);
     setTotalHints(0);
     setStartedAt(Date.now());
@@ -501,6 +670,16 @@ export default function App(): ReactElement {
     setPlayerName("");
     setSaved(false);
     setLastAnswer(null);
+    setDifficulty(null);
+    setModePokemon(pickModePokemon());
+  }
+
+  function toggleGeneration(generationId: GenerationId) {
+    setSelectedGenerationIds((current) =>
+      current.includes(generationId)
+        ? current.filter((id) => id !== generationId)
+        : [...current, generationId].sort((a, b) => a - b),
+    );
   }
 
   function handleHint() {
@@ -575,7 +754,7 @@ export default function App(): ReactElement {
   }
 
   function saveResult() {
-    if (saved || status !== "finished") {
+    if (saved || status !== "finished" || !difficulty) {
       return;
     }
 
@@ -596,6 +775,7 @@ export default function App(): ReactElement {
       <div
         className={cx(
           "mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 md:px-8 md:py-8",
+          status === "idle" && "home-idle-shell",
           isQuizActive && "quiz-active-shell",
         )}
       >
@@ -611,7 +791,7 @@ export default function App(): ReactElement {
               ポケモンを当てる。
             </h1>
           </div>
-          {isQuizActive && round && (
+          {isQuizActive && round && difficulty && (
             <div className="quiz-mobile-meta md:hidden">
               <div className="min-w-0">
                 <p>QUESTION {questionNumber}</p>
@@ -643,16 +823,28 @@ export default function App(): ReactElement {
         {status === "idle" && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
             <Panel className="p-5 md:p-7">
-              <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div className="mb-5">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">DIFFICULTY</p>
                   <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">レベルを選ぶ</h2>
                 </div>
-                <IconButton icon={Play} onClick={startGame}>
-                  はじめる
-                </IconButton>
               </div>
-              <DifficultySelector selected={difficulty} onSelect={setDifficulty} />
+              <div className="generation-count" aria-live="polite">
+                <span>対象</span>
+                <strong>{candidateSpeciesIds.length}</strong>
+                <span>匹</span>
+              </div>
+              <GenerationSelector
+                isOpen={generationAccordionOpen}
+                onToggle={toggleGeneration}
+                onToggleOpen={() => setGenerationAccordionOpen((current) => !current)}
+                selectedIds={selectedGenerationIds}
+              />
+              <DifficultySelector
+                modePokemon={modePokemon}
+                selected={difficulty}
+                onSelect={(nextDifficulty) => setDifficulty(nextDifficulty)}
+              />
             </Panel>
             <RankingPanel difficulty={difficulty} entries={activeRanking} />
           </div>
@@ -681,7 +873,7 @@ export default function App(): ReactElement {
           </Panel>
         )}
 
-        {(status === "playing" || status === "answered") && round && (
+        {(status === "playing" || status === "answered") && round && difficulty && (
           <div
             className={cx(
               "grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(22rem,1.05fr)]",
@@ -791,7 +983,7 @@ export default function App(): ReactElement {
           </div>
         )}
 
-        {status === "finished" && (
+        {status === "finished" && difficulty && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.85fr)]">
             <Panel className="p-6 md:p-8">
               <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
@@ -849,6 +1041,21 @@ export default function App(): ReactElement {
           </div>
         )}
       </div>
+      {status === "idle" && (
+        <div className="home-start-dock">
+          <div className="home-start-dock-inner">
+            <IconButton
+              className="home-start-button"
+              disabled={!canStartGame}
+              icon={Play}
+              onClick={startGame}
+              variant="cta"
+            >
+              クイズをはじめる
+            </IconButton>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
