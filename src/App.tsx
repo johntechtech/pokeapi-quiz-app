@@ -84,6 +84,7 @@ function IconButton({
   icon: Icon,
   onClick,
   disabled,
+  className,
   type = "button",
   variant = "primary",
 }: {
@@ -91,6 +92,7 @@ function IconButton({
   icon: IconComponent;
   onClick?: () => void;
   disabled?: boolean;
+  className?: string;
   type?: "button" | "submit";
   variant?: "primary" | "secondary" | "ghost" | "danger";
 }): ReactElement {
@@ -103,9 +105,11 @@ function IconButton({
 
   return (
     <button
+      aria-label={typeof children === "string" ? children : undefined}
       className={cx(
         "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-5 text-sm font-bold transition duration-200 active:translate-y-[1px] disabled:pointer-events-none disabled:opacity-45",
         variantClass,
+        className,
       )}
       disabled={disabled}
       onClick={onClick}
@@ -371,6 +375,7 @@ export default function App(): ReactElement {
   const currentClues = useMemo(() => (round ? visibleClues(round) : []), [round]);
   const elapsedMs = finishedAt && startedAt ? finishedAt - startedAt : 0;
   const activeRanking = rankings[difficulty] ?? [];
+  const isQuizActive = (status === "playing" || status === "answered") && round !== null;
 
   async function prepareRound(nextQuestionNumber: number, excludedIds: number[]) {
     setStatus("loading");
@@ -510,15 +515,36 @@ export default function App(): ReactElement {
 
   return (
     <main className="min-h-[100dvh] bg-[#f6f1e8] text-stone-950">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 md:px-8 md:py-8">
-        <header className="flex flex-col gap-4 border-b border-stone-300/70 pb-5 md:flex-row md:items-end md:justify-between">
-          <div>
+      <div
+        className={cx(
+          "mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 md:px-8 md:py-8",
+          isQuizActive && "quiz-active-shell",
+        )}
+      >
+        <header
+          className={cx(
+            "flex flex-col gap-4 border-b border-stone-300/70 pb-5 md:flex-row md:items-end md:justify-between",
+            isQuizActive && "quiz-active-header",
+          )}
+        >
+          <div className={cx(isQuizActive && "max-md:hidden")}>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a563c]">PokeAPI Quiz</p>
             <h1 className="mt-2 max-w-3xl text-4xl font-black leading-none tracking-tight text-stone-950 md:text-6xl">
               ポケモンを当てる。
             </h1>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-sm md:min-w-[22rem]">
+          {isQuizActive && round && (
+            <div className="quiz-mobile-meta md:hidden">
+              <div className="min-w-0">
+                <p>QUESTION {questionNumber}</p>
+                <h2>{difficultyLabels[difficulty]} モード</h2>
+              </div>
+              <IconButton className="quiz-mobile-home" icon={House} onClick={returnHome} variant="ghost">
+                ホームへ戻る
+              </IconButton>
+            </div>
+          )}
+          <div className={cx("grid grid-cols-3 gap-2 text-sm md:min-w-[22rem]", isQuizActive && "quiz-mobile-stats")}>
             <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
               <p className="text-xs font-bold text-stone-500">問題</p>
               <p className="font-mono text-xl font-black">{questionNumber || 0}/8</p>
@@ -576,21 +602,33 @@ export default function App(): ReactElement {
         )}
 
         {(status === "playing" || status === "answered") && round && (
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(22rem,1.05fr)]">
-            <div className="space-y-4">
-              <Panel className="p-5">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">
+          <div
+            className={cx(
+              "grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(22rem,1.05fr)]",
+              status === "playing" && "playing-layout",
+            )}
+          >
+            <div className="quiz-clue-column space-y-4">
+              <Panel className="quiz-meta max-md:hidden p-3 md:p-5">
+                <div className="flex items-center justify-between gap-3 md:flex-wrap md:gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-stone-500 md:text-xs md:tracking-[0.18em]">
                       QUESTION {questionNumber}
                     </p>
-                    <h2 className="mt-1 text-2xl font-black tracking-tight text-stone-950">
+                    <h2 className="mt-0.5 truncate text-base font-black tracking-tight text-stone-950 md:mt-1 md:text-2xl">
                       {difficultyLabels[difficulty]} モード
                     </h2>
                   </div>
-                  <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center md:w-auto">
-                    <ScoreGauge score={round.score} />
-                    <IconButton icon={House} onClick={returnHome} variant="ghost">
+                  <div className="flex shrink-0 items-center gap-2 md:w-auto md:gap-3">
+                    <div className="hidden md:block">
+                      <ScoreGauge score={round.score} />
+                    </div>
+                    <IconButton
+                      className="max-md:min-h-10 max-md:px-3 max-md:text-xs"
+                      icon={House}
+                      onClick={returnHome}
+                      variant="ghost"
+                    >
                       ホームへ戻る
                     </IconButton>
                   </div>
@@ -600,8 +638,7 @@ export default function App(): ReactElement {
               <Panel className="p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">CLUES</p>
-                    <h3 className="mt-1 text-xl font-black text-stone-950">表示中の情報</h3>
+                    <h3 className="text-xl font-black text-stone-950">ヒント</h3>
                   </div>
                   <Eye aria-hidden className="text-[#5aa89c]" size={26} weight="bold" />
                 </div>
@@ -609,7 +646,7 @@ export default function App(): ReactElement {
               </Panel>
             </div>
 
-            <div className="space-y-4">
+            <div className="quiz-visual-column space-y-4">
               <PokemonVisual
                 revealColorImage={
                   status === "answered" &&
@@ -618,7 +655,7 @@ export default function App(): ReactElement {
                 round={round}
               />
 
-              <Panel className="p-5">
+              <Panel className={cx("p-5", status === "playing" && "answer-dock")}>
                 <form className="space-y-4" onSubmit={handleAnswer}>
                   <div>
                     <label className="block text-sm font-black text-stone-950" htmlFor="answer">
@@ -647,21 +684,28 @@ export default function App(): ReactElement {
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-3">
+                  <div className="answer-actions grid grid-cols-3 items-end gap-2 md:flex md:flex-wrap md:gap-3">
                     {status === "playing" ? (
                       <>
-                        <IconButton icon={CheckCircle} type="submit">
-                          回答する
+                        <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
+                          回答
                         </IconButton>
-                        <IconButton
-                          disabled={round.revealedHints >= round.maxHints}
-                          icon={Eye}
-                          onClick={handleHint}
-                          variant="secondary"
-                        >
-                          ヒント
-                        </IconButton>
-                        <IconButton icon={XCircle} onClick={skipRound} variant="danger">
+                        <div className="hint-action md:contents">
+                          <div aria-live="polite" className="hint-score-badge md:hidden">
+                            <span>獲得</span>
+                            <strong>{round.score}pt</strong>
+                          </div>
+                          <IconButton
+                            className="max-md:w-full"
+                            disabled={round.revealedHints >= round.maxHints}
+                            icon={Eye}
+                            onClick={handleHint}
+                            variant="secondary"
+                          >
+                            ヒント
+                          </IconButton>
+                        </div>
+                        <IconButton className="max-md:w-full" icon={XCircle} onClick={skipRound} variant="danger">
                           スキップ
                         </IconButton>
                       </>
