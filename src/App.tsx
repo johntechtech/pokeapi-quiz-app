@@ -24,6 +24,7 @@ import {
   difficultyLabels,
   formatElapsed,
   isCorrectAnswer,
+  registerWrongAnswer,
   revealNextHint,
   shouldShowPokemonImage,
   shouldUseBlackSilhouette,
@@ -34,6 +35,7 @@ import type { Difficulty, QuizClue, QuizRound, RankingEntry } from "./lib/types"
 
 type GameStatus = "idle" | "loading" | "playing" | "answered" | "finished" | "error";
 type Notice = { tone: "success" | "error" | "info"; text: string } | null;
+type LastAnswer = { correct: boolean; score: number; answer: string };
 type IconComponent = React.ComponentType<IconProps>;
 
 const difficultyIcons: Record<Difficulty, IconComponent> = {
@@ -65,6 +67,20 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function scrollToQuizTop() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+
 function Panel({
   children,
   className,
@@ -94,13 +110,14 @@ function IconButton({
   disabled?: boolean;
   className?: string;
   type?: "button" | "submit";
-  variant?: "primary" | "secondary" | "ghost" | "danger";
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "cta";
 }): ReactElement {
   const variantClass = {
     primary: "border-[#22201d] bg-[#22201d] text-white hover:bg-[#34312d]",
     secondary: "border-stone-300 bg-white text-stone-900 hover:border-stone-500",
     ghost: "border-transparent bg-transparent text-stone-700 hover:bg-stone-100",
     danger: "border-[#c56e58] bg-[#fff4ef] text-[#8d321e] hover:border-[#9d4b34]",
+    cta: "border-[#b7831f] bg-[#f2bd45] text-stone-950 shadow-[0_18px_30px_-22px_rgba(123,77,16,0.78)] hover:bg-[#ffd15b]",
   }[variant];
 
   return (
@@ -303,8 +320,66 @@ function NoticeBox({ notice }: { notice: Notice }): ReactElement | null {
   );
 }
 
+function RoundResultBanner({
+  result,
+  actionIcon,
+  actionLabel,
+  onAction,
+}: {
+  result: LastAnswer;
+  actionIcon: IconComponent;
+  actionLabel: string;
+  onAction: () => void;
+}): ReactElement {
+  const Icon = result.correct ? CheckCircle : XCircle;
+  const toneClass = result.correct
+    ? "border-[#5aa89c] bg-[#effaf3] text-[#23563a]"
+    : "border-[#dd927e] bg-[#fff4ef] text-[#87341f]";
+
+  return (
+    <div
+      aria-live="polite"
+      className={cx("round-result-banner rounded-[1.75rem] border p-5 shadow-sm", toneClass)}
+    >
+      <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="grid size-14 shrink-0 place-items-center rounded-2xl bg-white/78">
+            <Icon aria-hidden size={34} weight="fill" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.16em] opacity-80">
+              {result.correct ? "ANSWER CLEAR" : "ANSWER"}
+            </p>
+            <h3 className="mt-1 text-4xl font-black leading-none tracking-tight text-stone-950 md:text-5xl">
+              {result.correct ? "正解" : "答え"}
+            </h3>
+          </div>
+        </div>
+
+        <IconButton className="next-question-button" icon={actionIcon} onClick={onAction} variant="cta">
+          {actionLabel}
+        </IconButton>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="min-w-0 rounded-2xl bg-white/70 px-4 py-3">
+          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">POKEMON</p>
+          <p className="mt-1 truncate text-2xl font-black text-stone-950">{result.answer}</p>
+        </div>
+        <div className="rounded-2xl bg-white/70 px-4 py-3 sm:min-w-36 sm:text-right">
+          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">SCORE</p>
+          <p className="mt-1 font-mono text-3xl font-black leading-none text-stone-950">
+            {result.score}
+            <span className="ml-1 text-sm font-black text-stone-500">pt</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ScoreGauge({ score }: { score: number }): ReactElement {
-  const ratio = Math.max(0.2, Math.min(1, score / 100));
+  const ratio = Math.max(0, Math.min(1, score / 100));
   const toneClass =
     score >= 70 ? "bg-[#5aa89c]" : score >= 40 ? "bg-[#d0a331]" : "bg-[#c56e58]";
 
@@ -313,7 +388,7 @@ function ScoreGauge({ score }: { score: number }): ReactElement {
       aria-label={`現在この問題で獲得できる点数は${score}点です`}
       className="w-full min-w-[14rem] rounded-[1.25rem] border border-stone-300 bg-stone-50 px-4 py-3"
       role="meter"
-      aria-valuemin={20}
+      aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={score}
     >
@@ -368,9 +443,7 @@ export default function App(): ReactElement {
   const [playerName, setPlayerName] = useState("");
   const [saved, setSaved] = useState(false);
   const [rankings, setRankings] = useState(loadRankings);
-  const [lastAnswer, setLastAnswer] = useState<{ correct: boolean; score: number; answer: string } | null>(
-    null,
-  );
+  const [lastAnswer, setLastAnswer] = useState<LastAnswer | null>(null);
 
   const currentClues = useMemo(() => (round ? visibleClues(round) : []), [round]);
   const elapsedMs = finishedAt && startedAt ? finishedAt - startedAt : 0;
@@ -457,7 +530,10 @@ export default function App(): ReactElement {
     }
 
     if (!isCorrectAnswer(answer, round.pokemon)) {
-      setNotice({ tone: "error", text: "まだ違います。ヒントを見ながらもう一度考えてください。" });
+      const nextRound = registerWrongAnswer(round);
+      const scoreLoss = round.score - nextRound.score;
+      setRound(nextRound);
+      setNotice({ tone: "error", text: scoreLoss > 0 ? `まだ違います。-${scoreLoss}点` : "まだ違います。" });
       return;
     }
 
@@ -465,8 +541,9 @@ export default function App(): ReactElement {
     setTotalScore((current) => current + score);
     setTotalHints((current) => current + round.revealedHints);
     setStatus("answered");
-    setNotice({ tone: "success", text: `正解です。${score}点ゲットしました。` });
+    setNotice({ tone: "success", text: `正解！${score}点獲得しました。` });
     setLastAnswer({ correct: true, score, answer: round.pokemon.displayNameJa });
+    scrollToQuizTop();
   }
 
   function skipRound() {
@@ -478,6 +555,7 @@ export default function App(): ReactElement {
     setStatus("answered");
     setNotice({ tone: "info", text: `答えは ${round.pokemon.displayNameJa} でした。` });
     setLastAnswer({ correct: false, score: 0, answer: round.pokemon.displayNameJa });
+    scrollToQuizTop();
   }
 
   function goNext() {
@@ -544,20 +622,22 @@ export default function App(): ReactElement {
               </IconButton>
             </div>
           )}
-          <div className={cx("grid grid-cols-3 gap-2 text-sm md:min-w-[22rem]", isQuizActive && "quiz-mobile-stats")}>
-            <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
-              <p className="text-xs font-bold text-stone-500">問題</p>
-              <p className="font-mono text-xl font-black">{questionNumber || 0}/8</p>
+          {status !== "idle" && (
+            <div className={cx("grid grid-cols-3 gap-2 text-sm md:min-w-[22rem]", isQuizActive && "quiz-mobile-stats")}>
+              <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
+                <p className="text-xs font-bold text-stone-500">問題</p>
+                <p className="font-mono text-xl font-black">{questionNumber || 0}/8</p>
+              </div>
+              <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
+                <p className="text-xs font-bold text-stone-500">得点</p>
+                <p className="font-mono text-xl font-black">{totalScore}</p>
+              </div>
+              <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
+                <p className="text-xs font-bold text-stone-500">ヒント</p>
+                <p className="font-mono text-xl font-black">{totalHints}</p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
-              <p className="text-xs font-bold text-stone-500">得点</p>
-              <p className="font-mono text-xl font-black">{totalScore}</p>
-            </div>
-            <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
-              <p className="text-xs font-bold text-stone-500">ヒント</p>
-              <p className="font-mono text-xl font-black">{totalHints}</p>
-            </div>
-          </div>
+          )}
         </header>
 
         {status === "idle" && (
@@ -647,76 +727,66 @@ export default function App(): ReactElement {
             </div>
 
             <div className="quiz-visual-column space-y-4">
+              {status === "answered" && lastAnswer && (
+                <RoundResultBanner
+                  actionIcon={questionNumber >= TOTAL_QUESTIONS ? Trophy : Play}
+                  actionLabel={questionNumber >= TOTAL_QUESTIONS ? "結果を見る" : "次の問題"}
+                  onAction={goNext}
+                  result={lastAnswer}
+                />
+              )}
+
               <PokemonVisual
-                revealColorImage={
-                  status === "answered" &&
-                  (round.difficulty === "professor" || round.difficulty === "trainer")
-                }
+                revealColorImage={status === "answered" && round.difficulty !== "kids"}
                 round={round}
               />
 
-              <Panel className={cx("p-5", status === "playing" && "answer-dock")}>
-                <form className="space-y-4" onSubmit={handleAnswer}>
-                  <div>
-                    <label className="block text-sm font-black text-stone-950" htmlFor="answer">
-                      ポケモンの名前
-                    </label>
-                    <input
-                      autoComplete="off"
-                      className="mt-2 min-h-12 w-full rounded-2xl border border-stone-300 bg-white px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-900/10 disabled:bg-stone-100"
-                      disabled={status !== "playing"}
-                      id="answer"
-                      onChange={(event) => setAnswer(event.target.value)}
-                      placeholder={difficulty === "kids" ? "ひらがなでもOK" : "カタカナでもひらがなでもOK"}
-                      value={answer}
-                    />
-                  </div>
-
-                  <NoticeBox notice={notice} />
-
-                  {lastAnswer && (
-                    <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
-                      <p className="text-xs font-bold text-stone-500">正解</p>
-                      <p className="mt-1 text-2xl font-black text-stone-950">{lastAnswer.answer}</p>
-                      <p className="text-sm font-bold text-stone-500">
-                        獲得点: {lastAnswer.score} / {lastAnswer.correct ? "正解" : "スキップ"}
-                      </p>
+              {status === "playing" && (
+                <Panel className="answer-dock p-5">
+                  <form className="space-y-4" onSubmit={handleAnswer}>
+                    <div>
+                      <label className="block text-sm font-black text-stone-950" htmlFor="answer">
+                        ポケモンの名前
+                      </label>
+                      <input
+                        autoComplete="off"
+                        className="mt-2 min-h-12 w-full rounded-2xl border border-stone-300 bg-white px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-900/10 disabled:bg-stone-100"
+                        disabled={status !== "playing"}
+                        id="answer"
+                        onChange={(event) => setAnswer(event.target.value)}
+                        placeholder={difficulty === "kids" ? "ひらがなでもOK" : "カタカナでもひらがなでもOK"}
+                        value={answer}
+                      />
                     </div>
-                  )}
 
-                  <div className="answer-actions grid grid-cols-3 items-end gap-2 md:flex md:flex-wrap md:gap-3">
-                    {status === "playing" ? (
-                      <>
-                        <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
-                          回答
-                        </IconButton>
-                        <div className="hint-action md:contents">
-                          <div aria-live="polite" className="hint-score-badge md:hidden">
-                            <span>獲得</span>
-                            <strong>{round.score}pt</strong>
-                          </div>
-                          <IconButton
-                            className="max-md:w-full"
-                            disabled={round.revealedHints >= round.maxHints}
-                            icon={Eye}
-                            onClick={handleHint}
-                            variant="secondary"
-                          >
-                            ヒント
-                          </IconButton>
-                        </div>
-                        <IconButton className="max-md:w-full" icon={XCircle} onClick={skipRound} variant="danger">
-                          スキップ
-                        </IconButton>
-                      </>
-                    ) : (
-                      <IconButton icon={questionNumber >= TOTAL_QUESTIONS ? Trophy : Play} onClick={goNext}>
-                        {questionNumber >= TOTAL_QUESTIONS ? "結果を見る" : "次の問題"}
+                    <NoticeBox notice={notice} />
+
+                    <div className="answer-actions grid grid-cols-3 items-end gap-2 md:flex md:flex-wrap md:gap-3">
+                      <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
+                        回答
                       </IconButton>
-                    )}
-                  </div>
-                </form>
-              </Panel>
+                      <div className="hint-action md:contents">
+                        <div aria-live="polite" className="hint-score-badge md:hidden">
+                          <span>獲得</span>
+                          <strong>{round.score}pt</strong>
+                        </div>
+                        <IconButton
+                          className="max-md:w-full"
+                          disabled={round.revealedHints >= round.maxHints}
+                          icon={Eye}
+                          onClick={handleHint}
+                          variant="secondary"
+                        >
+                          ヒント
+                        </IconButton>
+                      </div>
+                      <IconButton className="max-md:w-full" icon={XCircle} onClick={skipRound} variant="danger">
+                        スキップ
+                      </IconButton>
+                    </div>
+                  </form>
+                </Panel>
+              )}
             </div>
           </div>
         )}

@@ -46,7 +46,22 @@ input:disabled {
   color: #231f1b;
 }
 
+.next-question-button {
+  min-height: 3.25rem;
+  min-width: 13rem;
+  border-radius: 1rem;
+  font-size: 1rem;
+}
+
+.next-question-button span {
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  .round-result-banner {
+    animation: result-pop 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   [style*="animation-delay"] {
     animation: clue-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
@@ -224,6 +239,18 @@ input:disabled {
   .quiz-meta button span {
     display: none;
   }
+
+  .round-result-banner {
+    padding: 1rem;
+  }
+
+  .next-question-button {
+    min-height: 3.75rem;
+    width: 100%;
+    min-width: 0;
+    border-radius: 1.15rem;
+    font-size: 1.08rem;
+  }
 }
 
 @keyframes clue-in {
@@ -234,5 +261,16 @@ input:disabled {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes result-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

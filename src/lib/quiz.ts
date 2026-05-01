@@ -17,8 +17,9 @@ export const difficultyDescriptions: Record<Difficulty, string> = {
   trainer: "タイプ相性とバトル知識を鍛える",
 };
 
-export function calculateRoundScore(hintsUsed: number): number {
-  return Math.max(20, 100 - hintsUsed * 15);
+export function calculateRoundScore(hintsUsed: number, wrongAttempts = 0): number {
+  const hintAdjustedScore = Math.max(20, 100 - hintsUsed * 15);
+  return Math.max(0, hintAdjustedScore - wrongAttempts * 10);
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -56,6 +57,7 @@ function createKidsRound(pokemon: PokemonQuizData): QuizRound {
     difficulty: "kids",
     pokemon,
     revealedHints: 0,
+    wrongAttempts: 0,
     initialClues: [clue("kids-image", "すがた", "カラー", "image")],
     hintClues,
     maxHints: hintClues.length,
@@ -77,6 +79,7 @@ function createAdultRound(pokemon: PokemonQuizData): QuizRound {
     difficulty: "adult",
     pokemon,
     revealedHints: 0,
+    wrongAttempts: 0,
     initialClues: [clue("adult-image", "すがた", "黒いシルエット", "image")],
     hintClues,
     maxHints: hintClues.length,
@@ -118,6 +121,7 @@ function createProfessorRound(pokemon: PokemonQuizData): QuizRound {
     difficulty: "professor",
     pokemon,
     revealedHints: 0,
+    wrongAttempts: 0,
     initialClues: [facts[0]],
     hintClues,
     maxHints: hintClues.length,
@@ -172,6 +176,7 @@ function createTrainerRound(pokemon: PokemonQuizData): QuizRound {
     difficulty: "trainer",
     pokemon,
     revealedHints: 0,
+    wrongAttempts: 0,
     initialClues: [facts[0]],
     hintClues,
     maxHints: hintClues.length,
@@ -197,7 +202,16 @@ export function revealNextHint(round: QuizRound): QuizRound {
   return {
     ...round,
     revealedHints,
-    score: calculateRoundScore(revealedHints),
+    score: calculateRoundScore(revealedHints, round.wrongAttempts),
+  };
+}
+
+export function registerWrongAnswer(round: QuizRound): QuizRound {
+  const wrongAttempts = round.wrongAttempts + 1;
+  return {
+    ...round,
+    wrongAttempts,
+    score: calculateRoundScore(round.revealedHints, wrongAttempts),
   };
 }
 

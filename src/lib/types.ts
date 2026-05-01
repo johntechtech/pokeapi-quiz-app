@@ -54,6 +54,7 @@ export interface QuizRound {
   difficulty: Difficulty;
   pokemon: PokemonQuizData;
   revealedHints: number;
+  wrongAttempts: number;
   initialClues: QuizClue[];
   hintClues: QuizClue[];
   maxHints: number;
