@@ -399,7 +399,21 @@ function ClueList({ clues }: { clues: QuizClue[] }): ReactElement {
           <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] text-stone-400">
             {clueItem.label}
           </p>
-          {clueItem.kind === "audio" ? (
+          {clueItem.kind === "image" ? (
+            <div className="mt-2 flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#effaf6] text-[#4d8d77]">
+                <Eye aria-hidden size={19} weight="bold" />
+              </span>
+              <div className="min-w-0">
+                <p className="break-words text-base font-black leading-6 text-stone-950">
+                  {clueItem.value}
+                </p>
+                <p className="mt-1 text-xs font-bold leading-5 text-stone-600">
+                  画面上部の姿エリアを確認してください。
+                </p>
+              </div>
+            </div>
+          ) : clueItem.kind === "audio" ? (
             <audio className="mt-3 w-full" controls preload="none" src={clueItem.value}>
               鳴き声を再生できません。
             </audio>
@@ -435,7 +449,7 @@ function PokemonVisual({
       <div className="absolute inset-x-8 bottom-8 h-px bg-stone-300/80" />
       {canShow && src ? (
         <img
-          alt={isBlack ? "ポケモンの黒いシルエット" : "ポケモンの姿"}
+          alt={isBlack ? "ポケモンのシルエット" : "ポケモンのカラーの姿"}
           className={cx(
             "relative z-[1] max-h-[18rem] w-full max-w-[22rem] object-contain drop-shadow-[0_26px_24px_rgba(54,45,33,0.18)] transition duration-500",
             isBlack && "brightness-0 contrast-200 saturate-0 opacity-90",

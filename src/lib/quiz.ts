@@ -58,7 +58,7 @@ function createKidsRound(pokemon: PokemonQuizData): QuizRound {
     pokemon,
     revealedHints: 0,
     wrongAttempts: 0,
-    initialClues: [clue("kids-image", "すがた", "カラー", "image")],
+    initialClues: [clue("kids-image", "すがた", "カラーの姿が表示されています", "image")],
     hintClues,
     maxHints: hintClues.length,
     score: 100,
@@ -70,7 +70,7 @@ function createAdultRound(pokemon: PokemonQuizData): QuizRound {
   const hintClues = [
     clue("adult-types", "タイプ", pokemon.typesJa.join(" / ")),
     clue("adult-mask", "なまえ", maskName(name, 0), "name"),
-    clue("adult-color", "すがた", "カラーになりました", "image"),
+    clue("adult-color", "すがた", "カラーの姿が表示されました", "image"),
     clue("adult-first-letter", "なまえ", maskName(name, 1), "name"),
   ];
 
@@ -80,7 +80,7 @@ function createAdultRound(pokemon: PokemonQuizData): QuizRound {
     pokemon,
     revealedHints: 0,
     wrongAttempts: 0,
-    initialClues: [clue("adult-image", "すがた", "黒いシルエット", "image")],
+    initialClues: [clue("adult-image", "すがた", "シルエットが表示されています", "image")],
     hintClues,
     maxHints: hintClues.length,
     score: 100,
@@ -113,7 +113,7 @@ function createProfessorRound(pokemon: PokemonQuizData): QuizRound {
   const hintClues = [
     ...facts.slice(1),
     clue("professor-mask", "なまえ", maskName(pokemon.displayNameJa, 0), "name"),
-    clue("professor-silhouette", "すがた", "黒いシルエット", "image"),
+    clue("professor-silhouette", "すがた", "シルエットが表示されました", "image"),
   ];
 
   return {
@@ -168,7 +168,7 @@ function createTrainerRound(pokemon: PokemonQuizData): QuizRound {
   const hintClues = [
     ...facts.slice(1),
     clue("trainer-mask", "なまえ", maskName(pokemon.displayNameJa, 0), "name"),
-    clue("trainer-silhouette", "すがた", "黒いシルエット", "image"),
+    clue("trainer-silhouette", "すがた", "シルエットが表示されました", "image"),
   ];
 
   return {
