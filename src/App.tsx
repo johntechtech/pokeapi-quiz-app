@@ -16,27 +16,45 @@ import {
   XCircle,
   type IconProps,
 } from "@phosphor-icons/react";
-import { type FormEvent, type ReactElement, type ReactNode, useMemo, useState } from "react";
+import { type FormEvent, type ReactElement, type ReactNode, useEffect, useMemo, useState } from "react";
 import { fetchRandomPokemonQuizData } from "./lib/pokeapi";
 import {
   TOTAL_QUESTIONS,
+  createTrainerQuizRound,
   createQuizRound,
   difficultyDescriptions,
   difficultyLabels,
   formatElapsed,
   isCorrectAnswer,
+  isCorrectStructuredAnswer,
+  isTextAnswerRound,
+  professorLevelDescriptions,
+  professorLevelLabels,
+  professorLevelOrder,
   registerWrongAnswer,
   revealNextHint,
   shouldShowPokemonImage,
   shouldUseBlackSilhouette,
+  trainerLevelDescriptions,
+  trainerLevelLabels,
+  trainerLevelOrder,
   visibleClues,
 } from "./lib/quiz";
-import { loadRankings, saveRankingEntry } from "./lib/ranking";
-import type { Difficulty, QuizClue, QuizRound, RankingEntry } from "./lib/types";
+import { getRankingKey, loadRankings, saveRankingEntry } from "./lib/ranking";
+import type {
+  Difficulty,
+  ProfessorLevel,
+  QuizChoice,
+  QuizClue,
+  QuizRound,
+  RankingEntry,
+  RankingKey,
+  TrainerLevel,
+} from "./lib/types";
 
 type GameStatus = "idle" | "loading" | "playing" | "answered" | "finished" | "error";
 type Notice = { tone: "success" | "error" | "info"; text: string } | null;
-type LastAnswer = { correct: boolean; score: number; answer: string };
+type LastAnswer = { correct: boolean; score: number; answer: string; detail?: string };
 type IconComponent = React.ComponentType<IconProps>;
 type HomeModePokemon = { id: number; name: string; type: string; note: string };
 type GenerationId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
@@ -146,6 +164,42 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function formatModeName(
+  difficulty: Difficulty,
+  professorLevel?: ProfessorLevel | null,
+  trainerLevel?: TrainerLevel | null,
+): string {
+  if (difficulty === "professor" && professorLevel) {
+    return `博士モード（${professorLevelLabels[professorLevel]}）`;
+  }
+
+  if (difficulty === "trainer" && trainerLevel) {
+    return `トレーナーモード（${trainerLevelLabels[trainerLevel]}）`;
+  }
+
+  return `${difficultyLabels[difficulty]}モード`;
+}
+
+function formatRankingName(
+  difficulty: Difficulty | null,
+  professorLevel: ProfessorLevel | null,
+  trainerLevel: TrainerLevel | null,
+): string | null {
+  if (!difficulty) {
+    return null;
+  }
+
+  if (difficulty === "professor") {
+    return professorLevel ? `博士（${professorLevelLabels[professorLevel]}）` : null;
+  }
+
+  if (difficulty === "trainer") {
+    return trainerLevel ? `トレーナー（${trainerLevelLabels[trainerLevel]}）` : null;
+  }
+
+  return difficultyLabels[difficulty];
+}
+
 function scrollToQuizTop() {
   if (typeof window === "undefined") {
     return;
@@ -178,6 +232,8 @@ function IconButton({
   children,
   icon: Icon,
   onClick,
+  ariaDescribedBy,
+  ariaDisabled,
   disabled,
   className,
   type = "button",
@@ -186,6 +242,8 @@ function IconButton({
   children: ReactNode;
   icon: IconComponent;
   onClick?: () => void;
+  ariaDescribedBy?: string;
+  ariaDisabled?: boolean;
   disabled?: boolean;
   className?: string;
   type?: "button" | "submit";
@@ -198,13 +256,18 @@ function IconButton({
     danger: "border-[#c56e58] bg-[#fff4ef] text-[#8d321e] hover:border-[#9d4b34]",
     cta: "border-[#b7831f] bg-[#f2bd45] text-stone-950 shadow-[0_18px_30px_-22px_rgba(123,77,16,0.78)] hover:bg-[#ffd15b]",
   }[variant];
+  const disabledLike = disabled || ariaDisabled;
 
   return (
     <button
+      aria-describedby={ariaDescribedBy}
+      aria-disabled={ariaDisabled || undefined}
       aria-label={typeof children === "string" ? children : undefined}
       className={cx(
-        "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-5 text-sm font-bold transition duration-200 active:translate-y-[1px] disabled:pointer-events-none disabled:opacity-45",
+        "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-5 text-sm font-bold transition duration-200 active:translate-y-[1px] disabled:pointer-events-none",
         variantClass,
+        disabledLike && "opacity-45",
+        ariaDisabled && "cursor-not-allowed",
         className,
       )}
       disabled={disabled}
@@ -219,11 +282,19 @@ function IconButton({
 
 function DifficultySelector({
   selected,
+  selectedProfessorLevel,
+  selectedTrainerLevel,
   onSelect,
+  onSelectProfessorLevel,
+  onSelectTrainerLevel,
   modePokemon,
 }: {
   selected: Difficulty | null;
+  selectedProfessorLevel: ProfessorLevel | null;
+  selectedTrainerLevel: TrainerLevel | null;
   onSelect: (difficulty: Difficulty) => void;
+  onSelectProfessorLevel: (level: ProfessorLevel) => void;
+  onSelectTrainerLevel: (level: TrainerLevel) => void;
   modePokemon: Record<Difficulty, HomeModePokemon>;
 }): ReactElement {
   return (
@@ -234,49 +305,95 @@ function DifficultySelector({
         const pokemon = modePokemon[difficulty];
 
         return (
-          <button
-            className={cx(
-              "group min-h-44 overflow-hidden rounded-[1.5rem] border p-5 text-left transition duration-200 active:translate-y-[1px]",
-              active ? difficultyAccents[difficulty] : "border-stone-200 bg-white hover:border-stone-400",
+          <div className="difficulty-card-shell" key={difficulty}>
+            <button
+              aria-pressed={active}
+              className={cx(
+                "group min-h-44 w-full overflow-hidden rounded-[1.5rem] border p-5 text-left transition duration-200 active:translate-y-[1px]",
+                active ? difficultyAccents[difficulty] : "border-stone-200 bg-white hover:border-stone-400",
+              )}
+              onClick={() => onSelect(difficulty)}
+              type="button"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">MODE</p>
+                  <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">
+                    {difficultyLabels[difficulty]}
+                  </h2>
+                </div>
+                <span
+                  className={cx(
+                    "grid size-11 place-items-center rounded-full border transition duration-200",
+                    active
+                      ? "border-stone-900 bg-stone-950 text-white"
+                      : "border-stone-200 bg-stone-50 text-stone-700 group-hover:border-stone-500",
+                  )}
+                >
+                  <Icon aria-hidden size={22} weight="bold" />
+                </span>
+              </div>
+              <p className="mt-5 max-w-[26ch] text-sm leading-6 text-stone-600">
+                {difficultyDescriptions[difficulty]}
+              </p>
+              <div className="mode-pokemon">
+                <div className="mode-pokemon-copy">
+                  <p>{pokemon.note}</p>
+                  <strong>{pokemon.name}</strong>
+                  <span>{pokemon.type}</span>
+                </div>
+                <img
+                  alt={`${difficultyLabels[difficulty]}モードにおすすめの${pokemon.name}`}
+                  draggable={false}
+                  src={officialArtworkUrl(pokemon.id)}
+                />
+              </div>
+            </button>
+
+            {difficulty === "professor" && active && (
+              <div className="professor-level-panel" aria-label="博士モードのレベル">
+                {professorLevelOrder.map((level) => {
+                  const levelActive = selectedProfessorLevel === level;
+
+                  return (
+                    <button
+                      aria-pressed={levelActive}
+                      className={cx("professor-level-option", levelActive && "is-active")}
+                      key={level}
+                      onClick={() => onSelectProfessorLevel(level)}
+                      type="button"
+                    >
+                      <span>博士モード</span>
+                      <strong>{professorLevelLabels[level]}</strong>
+                      <small>{professorLevelDescriptions[level]}</small>
+                    </button>
+                  );
+                })}
+              </div>
             )}
-            key={difficulty}
-            onClick={() => onSelect(difficulty)}
-            type="button"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">MODE</p>
-                <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">
-                  {difficultyLabels[difficulty]}
-                </h2>
+
+            {difficulty === "trainer" && active && (
+              <div className="professor-level-panel" aria-label="トレーナーモードのレベル">
+                {trainerLevelOrder.map((level) => {
+                  const levelActive = selectedTrainerLevel === level;
+
+                  return (
+                    <button
+                      aria-pressed={levelActive}
+                      className={cx("professor-level-option", levelActive && "is-active")}
+                      key={level}
+                      onClick={() => onSelectTrainerLevel(level)}
+                      type="button"
+                    >
+                      <span>トレーナーモード</span>
+                      <strong>{trainerLevelLabels[level]}</strong>
+                      <small>{trainerLevelDescriptions[level]}</small>
+                    </button>
+                  );
+                })}
               </div>
-              <span
-                className={cx(
-                  "grid size-11 place-items-center rounded-full border transition duration-200",
-                  active
-                    ? "border-stone-900 bg-stone-950 text-white"
-                    : "border-stone-200 bg-stone-50 text-stone-700 group-hover:border-stone-500",
-                )}
-              >
-                <Icon aria-hidden size={22} weight="bold" />
-              </span>
-            </div>
-            <p className="mt-5 max-w-[26ch] text-sm leading-6 text-stone-600">
-              {difficultyDescriptions[difficulty]}
-            </p>
-            <div className="mode-pokemon">
-              <div className="mode-pokemon-copy">
-                <p>{pokemon.note}</p>
-                <strong>{pokemon.name}</strong>
-                <span>{pokemon.type}</span>
-              </div>
-              <img
-                alt={`${difficultyLabels[difficulty]}モードにおすすめの${pokemon.name}`}
-                draggable={false}
-                src={officialArtworkUrl(pokemon.id)}
-              />
-            </div>
-          </button>
+            )}
+          </div>
         );
       })}
     </div>
@@ -343,10 +460,12 @@ function GenerationSelector({
 
 function RankingPanel({
   entries,
-  difficulty,
+  emptyText,
+  modeLabel,
 }: {
   entries: RankingEntry[];
-  difficulty: Difficulty | null;
+  emptyText?: string;
+  modeLabel: string | null;
 }): ReactElement {
   return (
     <Panel className="p-5">
@@ -354,7 +473,7 @@ function RankingPanel({
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">RANKING</p>
           <h2 className="mt-1 text-lg font-black text-stone-950">
-            {difficulty ? `${difficultyLabels[difficulty]} トップ10` : "ランキング"}
+            {modeLabel ? `${modeLabel} トップ10` : "ランキング"}
           </h2>
         </div>
         <Trophy aria-hidden className="text-[#d0a331]" size={26} weight="bold" />
@@ -362,7 +481,7 @@ function RankingPanel({
 
       {entries.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-4 py-6 text-sm text-stone-500">
-          {difficulty ? "まだ記録がありません。" : "モードを選ぶとランキングを表示します。"}
+          {emptyText ?? (modeLabel ? "まだ記録がありません。" : "モードを選ぶとランキングを表示します。")}
         </div>
       ) : (
         <ol className="divide-y divide-stone-100">
@@ -384,6 +503,19 @@ function RankingPanel({
         </ol>
       )}
     </Panel>
+  );
+}
+
+function UpdateNotes(): ReactElement {
+  return (
+    <section className="update-notes" aria-label="バージョンアップデート">
+      <p>
+        <time dateTime="2026-05-04">2026.05.04</time>
+        <span>
+          博士モードに「見習い中・修行中・博士検定」を追加。いきなり博士検定に投げ込まれる事故を減らしました。白衣はレンタルからで大丈夫です。
+        </span>
+      </p>
+    </section>
   );
 }
 
@@ -459,7 +591,7 @@ function PokemonVisual({
         />
       ) : (
         <div className="relative z-[1] flex min-h-48 w-full max-w-[18rem] items-center justify-center rounded-full border border-dashed border-stone-300 bg-white/45 px-8 text-center text-sm font-bold leading-6 text-stone-500">
-          まだ姿は伏せられています
+          {round && !isTextAnswerRound(round) ? "バトル問題を表示中です" : "まだ姿は伏せられています"}
         </div>
       )}
     </div>
@@ -483,6 +615,214 @@ function NoticeBox({ notice }: { notice: Notice }): ReactElement | null {
       <Icon aria-hidden className="mt-0.5 shrink-0" size={18} weight="bold" />
       <p>{notice.text}</p>
     </div>
+  );
+}
+
+function ChoiceButton({
+  choice,
+  onSelect,
+}: {
+  choice: QuizChoice;
+  onSelect: (value: string) => void;
+}): ReactElement {
+  return (
+    <button
+      className="choice-answer-button"
+      onClick={() => onSelect(choice.value)}
+      type="button"
+    >
+      <strong>{choice.label}</strong>
+      {choice.description && <span>{choice.description}</span>}
+    </button>
+  );
+}
+
+function AnswerForm({
+  round,
+  answer,
+  selectedAnswer,
+  dualAnswer,
+  notice,
+  onAnswerChange,
+  onSelectedAnswerChange,
+  onDualAnswerChange,
+  onTextSubmit,
+  onChoiceAnswer,
+  onStructuredSubmit,
+  onHint,
+  onSkip,
+}: {
+  round: QuizRound;
+  answer: string;
+  selectedAnswer: string;
+  dualAnswer: { first: string; second: string };
+  notice: Notice;
+  onAnswerChange: (value: string) => void;
+  onSelectedAnswerChange: (value: string) => void;
+  onDualAnswerChange: (value: { first: string; second: string }) => void;
+  onTextSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onChoiceAnswer: (value: string) => void;
+  onStructuredSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onHint: () => void;
+  onSkip: () => void;
+}): ReactElement {
+  if (round.answerFormat === "choice") {
+    return (
+      <Panel className="answer-dock p-5">
+        <div className="space-y-4">
+          <div>
+            <p className="block text-sm font-black text-stone-950">選択肢</p>
+            <div className="choice-answer-grid mt-2">
+              {(round.choices ?? []).map((choice) => (
+                <ChoiceButton choice={choice} key={choice.value} onSelect={onChoiceAnswer} />
+              ))}
+            </div>
+          </div>
+          <NoticeBox notice={notice} />
+          <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
+            スキップ
+          </IconButton>
+        </div>
+      </Panel>
+    );
+  }
+
+  if (round.answerFormat === "select") {
+    return (
+      <Panel className="answer-dock p-5">
+        <form className="space-y-4" onSubmit={onStructuredSubmit}>
+          <div>
+            <label className="block text-sm font-black text-stone-950" htmlFor="structured-answer">
+              答えを選ぶ
+            </label>
+            <select
+              className="quiz-select mt-2"
+              id="structured-answer"
+              onChange={(event) => onSelectedAnswerChange(event.target.value)}
+              value={selectedAnswer}
+            >
+              <option value="">選択してください</option>
+              {(round.selectOptions ?? []).map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <NoticeBox notice={notice} />
+          <div className="answer-actions grid grid-cols-2 items-end gap-2 md:flex md:flex-wrap md:gap-3">
+            <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
+              回答
+            </IconButton>
+            <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
+              スキップ
+            </IconButton>
+          </div>
+        </form>
+      </Panel>
+    );
+  }
+
+  if (round.answerFormat === "dual-select") {
+    return (
+      <Panel className="answer-dock p-5">
+        <form className="space-y-4" onSubmit={onStructuredSubmit}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-black text-stone-950" htmlFor="dual-answer-first">
+                {round.dualSelect?.firstLabel ?? "1つ目"}
+              </label>
+              <select
+                className="quiz-select mt-2"
+                id="dual-answer-first"
+                onChange={(event) => onDualAnswerChange({ ...dualAnswer, first: event.target.value })}
+                value={dualAnswer.first}
+              >
+                <option value="">選択してください</option>
+                {(round.dualSelect?.firstOptions ?? []).map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-black text-stone-950" htmlFor="dual-answer-second">
+                {round.dualSelect?.secondLabel ?? "2つ目"}
+              </label>
+              <select
+                className="quiz-select mt-2"
+                id="dual-answer-second"
+                onChange={(event) => onDualAnswerChange({ ...dualAnswer, second: event.target.value })}
+                value={dualAnswer.second}
+              >
+                <option value="">選択してください</option>
+                {(round.dualSelect?.secondOptions ?? []).map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <NoticeBox notice={notice} />
+          <div className="answer-actions grid grid-cols-2 items-end gap-2 md:flex md:flex-wrap md:gap-3">
+            <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
+              回答
+            </IconButton>
+            <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
+              スキップ
+            </IconButton>
+          </div>
+        </form>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel className="answer-dock p-5">
+      <form className="space-y-4" onSubmit={onTextSubmit}>
+        <div>
+          <label className="block text-sm font-black text-stone-950" htmlFor="answer">
+            ポケモンの名前
+          </label>
+          <input
+            autoComplete="off"
+            className="mt-2 min-h-12 w-full rounded-2xl border border-stone-300 bg-white px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-900/10 disabled:bg-stone-100"
+            id="answer"
+            onChange={(event) => onAnswerChange(event.target.value)}
+            placeholder={round.difficulty === "kids" ? "ひらがなでもOK" : "カタカナでもひらがなでもOK"}
+            value={answer}
+          />
+        </div>
+
+        <NoticeBox notice={notice} />
+
+        <div className="answer-actions grid grid-cols-3 items-end gap-2 md:flex md:flex-wrap md:gap-3">
+          <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
+            回答
+          </IconButton>
+          <div className="hint-action md:contents">
+            <div aria-live="polite" className="hint-score-badge md:hidden">
+              <span>獲得</span>
+              <strong>{round.score}pt</strong>
+            </div>
+            <IconButton
+              className="max-md:w-full"
+              disabled={round.revealedHints >= round.maxHints}
+              icon={Eye}
+              onClick={onHint}
+              variant="secondary"
+            >
+              ヒント
+            </IconButton>
+          </div>
+          <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
+            スキップ
+          </IconButton>
+        </div>
+      </form>
+    </Panel>
   );
 }
 
@@ -529,8 +869,11 @@ function RoundResultBanner({
 
       <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
         <div className="min-w-0 rounded-2xl bg-white/70 px-4 py-3">
-          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">POKEMON</p>
+          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">ANSWER</p>
           <p className="mt-1 truncate text-2xl font-black text-stone-950">{result.answer}</p>
+          {result.detail && (
+            <p className="mt-1 text-xs font-bold leading-5 text-stone-600">{result.detail}</p>
+          )}
         </div>
         <div className="rounded-2xl bg-white/70 px-4 py-3 sm:min-w-36 sm:text-right">
           <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">SCORE</p>
@@ -596,11 +939,15 @@ function ScoreGauge({ score }: { score: number }): ReactElement {
 
 export default function App(): ReactElement {
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
+  const [professorLevel, setProfessorLevel] = useState<ProfessorLevel | null>(null);
+  const [trainerLevel, setTrainerLevel] = useState<TrainerLevel | null>(null);
   const [status, setStatus] = useState<GameStatus>("idle");
   const [round, setRound] = useState<QuizRound | null>(null);
   const [questionNumber, setQuestionNumber] = useState(0);
   const [usedIds, setUsedIds] = useState<number[]>([]);
   const [answer, setAnswer] = useState("");
+  const [selectedAnswer, setSelectedAnswer] = useState("");
+  const [dualAnswer, setDualAnswer] = useState({ first: "", second: "" });
   const [notice, setNotice] = useState<Notice>(null);
   const [totalScore, setTotalScore] = useState(0);
   const [totalHints, setTotalHints] = useState(0);
@@ -613,6 +960,7 @@ export default function App(): ReactElement {
   const [modePokemon, setModePokemon] = useState(pickModePokemon);
   const [selectedGenerationIds, setSelectedGenerationIds] = useState<GenerationId[]>(allGenerationIds);
   const [generationAccordionOpen, setGenerationAccordionOpen] = useState(false);
+  const [startTooltipVisible, setStartTooltipVisible] = useState(false);
 
   const currentClues = useMemo(() => (round ? visibleClues(round) : []), [round]);
   const candidateSpeciesIds = useMemo(
@@ -620,18 +968,60 @@ export default function App(): ReactElement {
     [selectedGenerationIds],
   );
   const elapsedMs = finishedAt && startedAt ? finishedAt - startedAt : 0;
-  const activeRanking = difficulty ? rankings[difficulty] ?? [] : [];
+  const hasSelectedModeLevel = Boolean(
+    difficulty &&
+      (difficulty !== "professor" || professorLevel) &&
+      (difficulty !== "trainer" || trainerLevel),
+  );
+  const selectedRankingKey: RankingKey | null =
+    difficulty && (difficulty !== "professor" || professorLevel) && (difficulty !== "trainer" || trainerLevel)
+      ? getRankingKey(difficulty, professorLevel ?? undefined, trainerLevel ?? undefined)
+      : null;
+  const activeRanking = selectedRankingKey ? rankings[selectedRankingKey] ?? [] : [];
+  const activeRankingLabel = formatRankingName(difficulty, professorLevel, trainerLevel);
+  const rankingEmptyText =
+    difficulty === "professor" && !professorLevel
+      ? "博士モードのレベルを選ぶとランキングを表示します。"
+      : difficulty === "trainer" && !trainerLevel
+        ? "トレーナーモードのレベルを選ぶとランキングを表示します。"
+      : undefined;
+  const activeModeName =
+    difficulty && hasSelectedModeLevel ? formatModeName(difficulty, professorLevel, trainerLevel) : null;
+  const startDisabledReason = !hasSelectedModeLevel
+    ? "モードとレベルを選択してください"
+    : candidateSpeciesIds.length === 0
+      ? "出題範囲を1つ以上選択してください"
+      : "";
   const isQuizActive = (status === "playing" || status === "answered") && round !== null && difficulty !== null;
-  const canStartGame = Boolean(difficulty) && candidateSpeciesIds.length > 0;
+  const canStartGame = hasSelectedModeLevel && candidateSpeciesIds.length > 0;
+
+  useEffect(() => {
+    if (!startTooltipVisible) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStartTooltipVisible(false);
+    }, 1800);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [startTooltipVisible]);
 
   async function prepareRound(nextQuestionNumber: number, excludedIds: number[]) {
-    if (!difficulty || candidateSpeciesIds.length === 0) {
+    if (
+      !difficulty ||
+      candidateSpeciesIds.length === 0 ||
+      (difficulty === "professor" && !professorLevel) ||
+      (difficulty === "trainer" && !trainerLevel)
+    ) {
       return;
     }
 
     setStatus("loading");
     setNotice(null);
     setAnswer("");
+    setSelectedAnswer("");
+    setDualAnswer({ first: "", second: "" });
     setLastAnswer(null);
     setQuestionNumber(nextQuestionNumber);
 
@@ -641,7 +1031,10 @@ export default function App(): ReactElement {
         includeProfessorData: difficulty === "professor",
         includeBattleData: difficulty === "trainer",
       });
-      const nextRound = createQuizRound(pokemon, difficulty);
+      const nextRound =
+        difficulty === "trainer"
+          ? await createTrainerQuizRound(pokemon, trainerLevel ?? "gymLeader", candidateSpeciesIds)
+          : createQuizRound(pokemon, difficulty, professorLevel ?? undefined);
       setRound(nextRound);
       setUsedIds([...excludedIds, pokemon.id]);
       setStatus("playing");
@@ -665,9 +1058,44 @@ export default function App(): ReactElement {
     setStartedAt(Date.now());
     setFinishedAt(null);
     setUsedIds([]);
+    setAnswer("");
+    setSelectedAnswer("");
+    setDualAnswer({ first: "", second: "" });
     setSaved(false);
     setPlayerName("");
     void prepareRound(1, []);
+  }
+
+  function handleStartButtonClick() {
+    if (!canStartGame) {
+      setStartTooltipVisible(true);
+      return;
+    }
+
+    startGame();
+  }
+
+  function handleDifficultySelect(nextDifficulty: Difficulty) {
+    setDifficulty(nextDifficulty);
+    setStartTooltipVisible(false);
+
+    if (nextDifficulty !== "professor") {
+      setProfessorLevel(null);
+    }
+
+    if (nextDifficulty !== "trainer") {
+      setTrainerLevel(null);
+    }
+  }
+
+  function handleProfessorLevelSelect(nextProfessorLevel: ProfessorLevel) {
+    setProfessorLevel(nextProfessorLevel);
+    setStartTooltipVisible(false);
+  }
+
+  function handleTrainerLevelSelect(nextTrainerLevel: TrainerLevel) {
+    setTrainerLevel(nextTrainerLevel);
+    setStartTooltipVisible(false);
   }
 
   function returnHome() {
@@ -676,6 +1104,8 @@ export default function App(): ReactElement {
     setQuestionNumber(0);
     setUsedIds([]);
     setAnswer("");
+    setSelectedAnswer("");
+    setDualAnswer({ first: "", second: "" });
     setNotice(null);
     setTotalScore(0);
     setTotalHints(0);
@@ -685,10 +1115,14 @@ export default function App(): ReactElement {
     setSaved(false);
     setLastAnswer(null);
     setDifficulty(null);
+    setProfessorLevel(null);
+    setTrainerLevel(null);
     setModePokemon(pickModePokemon());
+    setStartTooltipVisible(false);
   }
 
   function toggleGeneration(generationId: GenerationId) {
+    setStartTooltipVisible(false);
     setSelectedGenerationIds((current) =>
       current.includes(generationId)
         ? current.filter((id) => id !== generationId)
@@ -697,7 +1131,7 @@ export default function App(): ReactElement {
   }
 
   function handleHint() {
-    if (!round || status !== "playing") {
+    if (!round || status !== "playing" || !isTextAnswerRound(round)) {
       return;
     }
 
@@ -711,9 +1145,21 @@ export default function App(): ReactElement {
     setNotice(null);
   }
 
+  function finishRound(correct: boolean, score: number, answerLabel: string, detail?: string) {
+    setTotalScore((current) => current + score);
+    setTotalHints((current) => current + (round?.revealedHints ?? 0));
+    setStatus("answered");
+    setNotice({
+      tone: correct ? "success" : "info",
+      text: correct ? `正解！${score}点獲得しました。` : `答えは ${answerLabel} でした。`,
+    });
+    setLastAnswer({ correct, score, answer: answerLabel, detail });
+    scrollToQuizTop();
+  }
+
   function handleAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!round || status !== "playing") {
+    if (!round || status !== "playing" || !isTextAnswerRound(round)) {
       return;
     }
 
@@ -731,12 +1177,50 @@ export default function App(): ReactElement {
     }
 
     const score = round.score;
-    setTotalScore((current) => current + score);
-    setTotalHints((current) => current + round.revealedHints);
-    setStatus("answered");
-    setNotice({ tone: "success", text: `正解！${score}点獲得しました。` });
-    setLastAnswer({ correct: true, score, answer: round.pokemon.displayNameJa });
-    scrollToQuizTop();
+    finishRound(true, score, round.pokemon.displayNameJa);
+  }
+
+  function handleChoiceAnswer(value: string) {
+    if (!round || status !== "playing" || isTextAnswerRound(round)) {
+      return;
+    }
+
+    const correct = isCorrectStructuredAnswer(round, value);
+    finishRound(
+      correct,
+      correct ? 100 : 0,
+      round.correctAnswerLabel ?? round.answer,
+      correct ? round.resultDetail : round.resultDetail ?? "次は読み勝ちましょう。",
+    );
+  }
+
+  function handleStructuredAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!round || status !== "playing" || isTextAnswerRound(round)) {
+      return;
+    }
+
+    if (round.answerFormat === "select" && !selectedAnswer) {
+      setNotice({ tone: "error", text: "答えを選択してください。" });
+      return;
+    }
+
+    if (round.answerFormat === "dual-select" && (!dualAnswer.first || !dualAnswer.second)) {
+      setNotice({ tone: "error", text: "上がる能力と下がる能力を選択してください。" });
+      return;
+    }
+
+    const correct =
+      round.answerFormat === "dual-select"
+        ? isCorrectStructuredAnswer(round, dualAnswer.first, dualAnswer.second)
+        : isCorrectStructuredAnswer(round, selectedAnswer);
+
+    finishRound(
+      correct,
+      correct ? 100 : 0,
+      round.correctAnswerLabel ?? round.answer,
+      correct ? round.resultDetail : round.resultDetail ?? "バトルの読み筋、もう一回磨けます。",
+    );
   }
 
   function skipRound() {
@@ -746,8 +1230,13 @@ export default function App(): ReactElement {
 
     setTotalHints((current) => current + round.revealedHints);
     setStatus("answered");
-    setNotice({ tone: "info", text: `答えは ${round.pokemon.displayNameJa} でした。` });
-    setLastAnswer({ correct: false, score: 0, answer: round.pokemon.displayNameJa });
+    setNotice({ tone: "info", text: `答えは ${round.correctAnswerLabel ?? round.pokemon.displayNameJa} でした。` });
+    setLastAnswer({
+      correct: false,
+      score: 0,
+      answer: round.correctAnswerLabel ?? round.pokemon.displayNameJa,
+      detail: round.resultDetail,
+    });
     scrollToQuizTop();
   }
 
@@ -768,12 +1257,20 @@ export default function App(): ReactElement {
   }
 
   function saveResult() {
-    if (saved || status !== "finished" || !difficulty) {
+    if (
+      saved ||
+      status !== "finished" ||
+      !difficulty ||
+      (difficulty === "professor" && !professorLevel) ||
+      (difficulty === "trainer" && !trainerLevel)
+    ) {
       return;
     }
 
     const entry: RankingEntry = {
       difficulty,
+      professorLevel: difficulty === "professor" ? professorLevel ?? undefined : undefined,
+      trainerLevel: difficulty === "trainer" ? trainerLevel ?? undefined : undefined,
       playerName: playerName.trim() || "プレイヤー",
       score: totalScore,
       hintsUsed: totalHints,
@@ -809,7 +1306,13 @@ export default function App(): ReactElement {
             <div className="quiz-mobile-meta md:hidden">
               <div className="min-w-0">
                 <p>QUESTION {questionNumber}</p>
-                <h2>{difficultyLabels[difficulty]} モード</h2>
+                <h2>
+                  {formatModeName(
+                    difficulty,
+                    round.professorLevel ?? professorLevel,
+                    round.trainerLevel ?? trainerLevel,
+                  )}
+                </h2>
               </div>
               <IconButton className="quiz-mobile-home" icon={House} onClick={returnHome} variant="ghost">
                 ホームへ戻る
@@ -835,33 +1338,40 @@ export default function App(): ReactElement {
         </header>
 
         {status === "idle" && (
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
-            <Panel className="p-5 md:p-7">
-              <div className="mb-5">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">DIFFICULTY</p>
-                  <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">レベルを選ぶ</h2>
+          <>
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
+              <Panel className="p-5 md:p-7">
+                <div className="mb-5">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">DIFFICULTY</p>
+                    <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">レベルを選ぶ</h2>
+                  </div>
                 </div>
-              </div>
-              <div className="generation-count" aria-live="polite">
-                <span>対象</span>
-                <strong>{candidateSpeciesIds.length}</strong>
-                <span>匹</span>
-              </div>
-              <GenerationSelector
-                isOpen={generationAccordionOpen}
-                onToggle={toggleGeneration}
-                onToggleOpen={() => setGenerationAccordionOpen((current) => !current)}
-                selectedIds={selectedGenerationIds}
-              />
-              <DifficultySelector
-                modePokemon={modePokemon}
-                selected={difficulty}
-                onSelect={(nextDifficulty) => setDifficulty(nextDifficulty)}
-              />
-            </Panel>
-            <RankingPanel difficulty={difficulty} entries={activeRanking} />
-          </div>
+                <div className="generation-count" aria-live="polite">
+                  <span>対象</span>
+                  <strong>{candidateSpeciesIds.length}</strong>
+                  <span>匹</span>
+                </div>
+                <GenerationSelector
+                  isOpen={generationAccordionOpen}
+                  onToggle={toggleGeneration}
+                  onToggleOpen={() => setGenerationAccordionOpen((current) => !current)}
+                  selectedIds={selectedGenerationIds}
+                />
+                <DifficultySelector
+                  modePokemon={modePokemon}
+                  selected={difficulty}
+                  selectedProfessorLevel={professorLevel}
+                  selectedTrainerLevel={trainerLevel}
+                  onSelect={handleDifficultySelect}
+                  onSelectProfessorLevel={handleProfessorLevelSelect}
+                  onSelectTrainerLevel={handleTrainerLevelSelect}
+                />
+              </Panel>
+              <RankingPanel emptyText={rankingEmptyText} entries={activeRanking} modeLabel={activeRankingLabel} />
+            </div>
+            <UpdateNotes />
+          </>
         )}
 
         {status === "loading" && (
@@ -902,7 +1412,11 @@ export default function App(): ReactElement {
                       QUESTION {questionNumber}
                     </p>
                     <h2 className="mt-0.5 truncate text-base font-black tracking-tight text-stone-950 md:mt-1 md:text-2xl">
-                      {difficultyLabels[difficulty]} モード
+                      {formatModeName(
+                        difficulty,
+                        round.professorLevel ?? professorLevel,
+                        round.trainerLevel ?? trainerLevel,
+                      )}
                     </h2>
                   </div>
                   <div className="flex shrink-0 items-center gap-2 md:w-auto md:gap-3">
@@ -924,10 +1438,19 @@ export default function App(): ReactElement {
               <Panel className="p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-xl font-black text-stone-950">ヒント</h3>
+                    <h3 className="text-xl font-black text-stone-950">
+                      {isTextAnswerRound(round) ? "ヒント" : "問題情報"}
+                    </h3>
                   </div>
                   <Eye aria-hidden className="text-[#5aa89c]" size={26} weight="bold" />
                 </div>
+                {round.prompt && (
+                  <div className="quiz-prompt">
+                    <p>{round.prompt.title}</p>
+                    <strong>{round.prompt.body}</strong>
+                    {round.prompt.detail && <span>{round.prompt.detail}</span>}
+                  </div>
+                )}
                 <ClueList clues={currentClues} />
               </Panel>
             </div>
@@ -948,50 +1471,21 @@ export default function App(): ReactElement {
               />
 
               {status === "playing" && (
-                <Panel className="answer-dock p-5">
-                  <form className="space-y-4" onSubmit={handleAnswer}>
-                    <div>
-                      <label className="block text-sm font-black text-stone-950" htmlFor="answer">
-                        ポケモンの名前
-                      </label>
-                      <input
-                        autoComplete="off"
-                        className="mt-2 min-h-12 w-full rounded-2xl border border-stone-300 bg-white px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-900/10 disabled:bg-stone-100"
-                        disabled={status !== "playing"}
-                        id="answer"
-                        onChange={(event) => setAnswer(event.target.value)}
-                        placeholder={difficulty === "kids" ? "ひらがなでもOK" : "カタカナでもひらがなでもOK"}
-                        value={answer}
-                      />
-                    </div>
-
-                    <NoticeBox notice={notice} />
-
-                    <div className="answer-actions grid grid-cols-3 items-end gap-2 md:flex md:flex-wrap md:gap-3">
-                      <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
-                        回答
-                      </IconButton>
-                      <div className="hint-action md:contents">
-                        <div aria-live="polite" className="hint-score-badge md:hidden">
-                          <span>獲得</span>
-                          <strong>{round.score}pt</strong>
-                        </div>
-                        <IconButton
-                          className="max-md:w-full"
-                          disabled={round.revealedHints >= round.maxHints}
-                          icon={Eye}
-                          onClick={handleHint}
-                          variant="secondary"
-                        >
-                          ヒント
-                        </IconButton>
-                      </div>
-                      <IconButton className="max-md:w-full" icon={XCircle} onClick={skipRound} variant="danger">
-                        スキップ
-                      </IconButton>
-                    </div>
-                  </form>
-                </Panel>
+                <AnswerForm
+                  answer={answer}
+                  dualAnswer={dualAnswer}
+                  notice={notice}
+                  onAnswerChange={setAnswer}
+                  onChoiceAnswer={handleChoiceAnswer}
+                  onDualAnswerChange={setDualAnswer}
+                  onHint={handleHint}
+                  onSelectedAnswerChange={setSelectedAnswer}
+                  onSkip={skipRound}
+                  onStructuredSubmit={handleStructuredAnswer}
+                  onTextSubmit={handleAnswer}
+                  round={round}
+                  selectedAnswer={selectedAnswer}
+                />
               )}
             </div>
           </div>
@@ -1007,7 +1501,7 @@ export default function App(): ReactElement {
                     {totalScore} / 800
                   </h2>
                   <p className="mt-4 text-sm font-bold leading-6 text-stone-600">
-                    {difficultyLabels[difficulty]}モードを完走しました。ヒント {totalHints} 回、
+                    {formatModeName(difficulty, professorLevel, trainerLevel)}を完走しました。ヒント {totalHints} 回、
                     タイム {formatElapsed(elapsedMs)}。
                   </p>
                 </div>
@@ -1051,22 +1545,30 @@ export default function App(): ReactElement {
                 </IconButton>
               </div>
             </Panel>
-            <RankingPanel difficulty={difficulty} entries={activeRanking} />
+            <RankingPanel entries={activeRanking} modeLabel={activeModeName} />
           </div>
         )}
       </div>
       {status === "idle" && (
         <div className="home-start-dock">
           <div className="home-start-dock-inner">
-            <IconButton
-              className="home-start-button"
-              disabled={!canStartGame}
-              icon={Play}
-              onClick={startGame}
-              variant="cta"
-            >
-              クイズをはじめる
-            </IconButton>
+            <div className="home-start-button-wrap">
+              {startTooltipVisible && startDisabledReason && (
+                <div className="home-start-tooltip" id="home-start-tooltip" role="tooltip">
+                  {startDisabledReason}
+                </div>
+              )}
+              <IconButton
+                ariaDescribedBy={startTooltipVisible ? "home-start-tooltip" : undefined}
+                ariaDisabled={!canStartGame}
+                className="home-start-button"
+                icon={Play}
+                onClick={handleStartButtonClick}
+                variant="cta"
+              >
+                クイズをはじめる
+              </IconButton>
+            </div>
           </div>
         </div>
       )}

@@ -3,7 +3,8 @@ import type { PokemonQuizData, PokemonStat, StatKey, TypeMatchups } from "./type
 const API_BASE = "https://pokeapi.co/api/v2";
 const CACHE_PREFIX = "poke-quiz-api-cache:v1:";
 const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14;
-const CORE_TYPE_NAMES = [
+export const NO_INFORMATION = "情報がありません";
+export const CORE_TYPE_NAMES = [
   "normal",
   "fighting",
   "flying",
@@ -24,7 +25,7 @@ const CORE_TYPE_NAMES = [
   "fairy",
 ] as const;
 
-type CoreTypeName = (typeof CORE_TYPE_NAMES)[number];
+export type CoreTypeName = (typeof CORE_TYPE_NAMES)[number];
 
 interface NamedResource {
   name: string;
@@ -38,6 +39,11 @@ interface LocalizedName {
 
 interface PokemonListResponse {
   count: number;
+}
+
+interface ResourceListResponse {
+  count: number;
+  results: NamedResource[];
 }
 
 interface PokemonSpeciesResponse {
@@ -102,15 +108,75 @@ interface TypeResponse {
     double_damage_to: NamedResource[];
     half_damage_to: NamedResource[];
     no_damage_to: NamedResource[];
+    double_damage_from: NamedResource[];
+    half_damage_from: NamedResource[];
+    no_damage_from: NamedResource[];
   };
+  moves: NamedResource[];
 }
 
 interface AbilityResponse {
+  id: number;
+  name: string;
   names: LocalizedName[];
+  flavor_text_entries?: Array<{
+    flavor_text: string;
+    language: NamedResource;
+  }>;
+  effect_entries?: Array<{
+    effect: string;
+    short_effect: string;
+    language: NamedResource;
+  }>;
 }
 
 interface MoveResponse {
+  id: number;
+  name: string;
   names: LocalizedName[];
+  accuracy: number | null;
+  power: number | null;
+  priority: number;
+  type: NamedResource;
+  damage_class: NamedResource;
+}
+
+interface NatureResponse {
+  id: number;
+  name: string;
+  names: LocalizedName[];
+  increased_stat: NamedResource | null;
+  decreased_stat: NamedResource | null;
+}
+
+export interface BattleType {
+  apiName: CoreTypeName;
+  nameJa: string;
+}
+
+export interface BattleMove {
+  apiName: string;
+  nameJa: string;
+  typeApiName: CoreTypeName;
+  typeJa: string;
+  power: number | null;
+  accuracy: number | null;
+  priority: number;
+}
+
+export interface BattleAbility {
+  apiName: string;
+  nameJa: string;
+  descriptionJa: string;
+}
+
+export interface BattleNature {
+  apiName: string;
+  nameJa: string;
+  increasedStat: Exclude<StatKey, "hp"> | null;
+  decreasedStat: Exclude<StatKey, "hp"> | null;
+  increasedStatJa: string;
+  decreasedStatJa: string;
 }
 
 export interface FetchPokemonQuizDataOptions {
@@ -119,7 +185,7 @@ export interface FetchPokemonQuizDataOptions {
   candidateSpeciesIds?: number[];
 }
 
-const statLabels: Record<StatKey, string> = {
+export const statLabels: Record<StatKey, string> = {
   hp: "HP",
   attack: "こうげき",
   defense: "ぼうぎょ",
@@ -160,6 +226,17 @@ const typeFallbacks: Record<string, string> = {
   dark: "あく",
   fairy: "フェアリー",
 };
+
+const battleStatKeys: Array<Exclude<StatKey, "hp">> = [
+  "attack",
+  "defense",
+  "special-attack",
+  "special-defense",
+  "speed",
+];
+
+let battleTypesCache: Promise<BattleType[]> | null = null;
+let battleNaturesCache: Promise<BattleNature[]> | null = null;
 
 export function katakanaToHiragana(value: string): string {
   return value.replace(/[\u30a1-\u30f6]/g, (char) =>
@@ -289,6 +366,230 @@ async function fetchTypeNameJa(typeName: string): Promise<string> {
   }
 }
 
+function isCoreTypeName(value: string): value is CoreTypeName {
+  return (CORE_TYPE_NAMES as readonly string[]).includes(value);
+}
+
+export function getBattleStatOptions(): Array<{ key: Exclude<StatKey, "hp">; label: string }> {
+  return battleStatKeys.map((key) => ({ key, label: statLabels[key] }));
+}
+
+export async function getCoreBattleTypes(): Promise<BattleType[]> {
+  battleTypesCache ??= Promise.all(
+    CORE_TYPE_NAMES.map(async (apiName) => ({
+      apiName,
+      nameJa: await fetchTypeNameJa(apiName),
+    })),
+  );
+
+  return battleTypesCache;
+}
+
+export async function calculateAttackMultiplier(
+  attackTypeName: string,
+  targetTypeNames: string[],
+): Promise<number> {
+  const attackType = await fetchTypeDetail(attackTypeName);
+  let multiplier = 1;
+
+  for (const targetTypeName of targetTypeNames) {
+    if (includesResource(attackType.damage_relations.no_damage_to, targetTypeName)) {
+      multiplier *= 0;
+    } else if (includesResource(attackType.damage_relations.double_damage_to, targetTypeName)) {
+      multiplier *= 2;
+    } else if (includesResource(attackType.damage_relations.half_damage_to, targetTypeName)) {
+      multiplier *= 0.5;
+    }
+  }
+
+  return multiplier;
+}
+
+async function fetchMoveDetail(nameOrUrl: string): Promise<BattleMove> {
+  const isUrl = nameOrUrl.startsWith("http");
+  const url = isUrl ? nameOrUrl : `${API_BASE}/move/${nameOrUrl}`;
+  const move = await fetchJsonCached<MoveResponse>(url);
+  if (!isCoreTypeName(move.type.name)) {
+    throw new Error(`Unsupported move type: ${move.type.name}`);
+  }
+
+  return {
+    apiName: move.name,
+    nameJa: getLocalizedName(move.names, move.name),
+    typeApiName: move.type.name,
+    typeJa: await fetchTypeNameJa(move.type.name),
+    power: move.power,
+    accuracy: move.accuracy,
+    priority: move.priority,
+  };
+}
+
+async function getMoveCount(): Promise<number> {
+  const result = await fetchJsonCached<ResourceListResponse>(`${API_BASE}/move?limit=1`);
+  return result.count;
+}
+
+export async function fetchBattleMove(nameOrUrl: string): Promise<BattleMove> {
+  return fetchMoveDetail(nameOrUrl);
+}
+
+export async function fetchBattleMovesByNames(names: string[]): Promise<BattleMove[]> {
+  const moves = await Promise.all(
+    names.map(async (name) => {
+      try {
+        return await fetchMoveDetail(name);
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return moves.filter((move): move is BattleMove => Boolean(move));
+}
+
+export async function fetchRandomBattleMove({
+  typeName,
+  excludeApiNames = [],
+  requirePower = false,
+  requireAccuracy = false,
+}: {
+  typeName?: CoreTypeName;
+  excludeApiNames?: string[];
+  requirePower?: boolean;
+  requireAccuracy?: boolean;
+} = {}): Promise<BattleMove> {
+  const excluded = new Set(excludeApiNames);
+  const moveResources = typeName ? (await fetchTypeDetail(typeName)).moves : null;
+  const maxAttempts = 36;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const candidate = moveResources?.length
+      ? moveResources[Math.floor(Math.random() * moveResources.length)].url
+      : String(Math.floor(Math.random() * (await getMoveCount())) + 1);
+
+    try {
+      const move = await fetchMoveDetail(candidate);
+      if (excluded.has(move.apiName)) {
+        continue;
+      }
+
+      if (requirePower && move.power === null) {
+        continue;
+      }
+
+      if (requireAccuracy && move.accuracy === null) {
+        continue;
+      }
+
+      return move;
+    } catch {
+      // Some older contest/status data can be sparse. Keep sampling.
+    }
+  }
+
+  throw new Error("条件に合う技データを取得できませんでした。");
+}
+
+function cleanBattleText(value: string): string {
+  return value.replace(/\f/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function getAbilityDescriptionJa(ability: AbilityResponse): string {
+  const flavor =
+    ability.flavor_text_entries
+      ?.filter((entry) => entry.language.name === "ja-Hrkt" || entry.language.name === "ja")
+      .map((entry) => cleanBattleText(entry.flavor_text))
+      .find(Boolean) ?? "";
+
+  if (flavor) {
+    return flavor;
+  }
+
+  return (
+    ability.effect_entries
+      ?.filter((entry) => entry.language.name === "ja-Hrkt" || entry.language.name === "ja")
+      .map((entry) => cleanBattleText(entry.short_effect || entry.effect))
+      .find(Boolean) ?? ""
+  );
+}
+
+async function getAbilityCount(): Promise<number> {
+  const result = await fetchJsonCached<ResourceListResponse>(`${API_BASE}/ability?limit=1`);
+  return result.count;
+}
+
+export async function fetchRandomBattleAbility(excludeApiNames: string[] = []): Promise<BattleAbility> {
+  const excluded = new Set(excludeApiNames);
+  const count = await getAbilityCount();
+  const maxAttempts = 36;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const ability = await fetchJsonCached<AbilityResponse>(
+        `${API_BASE}/ability/${Math.floor(Math.random() * count) + 1}`,
+      );
+      const descriptionJa = getAbilityDescriptionJa(ability);
+      if (!descriptionJa || excluded.has(ability.name)) {
+        continue;
+      }
+
+      return {
+        apiName: ability.name,
+        nameJa: getLocalizedName(ability.names, ability.name),
+        descriptionJa,
+      };
+    } catch {
+      // Try another ability.
+    }
+  }
+
+  throw new Error("条件に合う特性データを取得できませんでした。");
+}
+
+async function fetchBattleNatures(): Promise<BattleNature[]> {
+  if (!battleNaturesCache) {
+    battleNaturesCache = (async (): Promise<BattleNature[]> => {
+    const list = await fetchJsonCached<ResourceListResponse>(`${API_BASE}/nature?limit=25`);
+    const natures: Array<BattleNature | null> = await Promise.all(
+      list.results.map(async (resource) => {
+        const nature = await fetchJsonCached<NatureResponse>(resource.url);
+        const increased = nature.increased_stat?.name ?? null;
+        const decreased = nature.decreased_stat?.name ?? null;
+        if (!increased || !decreased || !isBattleStatKey(increased) || !isBattleStatKey(decreased)) {
+          return null;
+        }
+
+        return {
+          apiName: nature.name,
+          nameJa: getLocalizedName(nature.names, nature.name),
+          increasedStat: increased,
+          decreasedStat: decreased,
+          increasedStatJa: statLabels[increased],
+          decreasedStatJa: statLabels[decreased],
+        };
+      }),
+    );
+
+    return natures.filter((nature): nature is BattleNature => Boolean(nature));
+    })();
+  }
+
+  return battleNaturesCache;
+}
+
+function isBattleStatKey(value: string): value is Exclude<StatKey, "hp"> {
+  return battleStatKeys.includes(value as Exclude<StatKey, "hp">);
+}
+
+export async function fetchRandomBattleNature(): Promise<BattleNature> {
+  const natures = await fetchBattleNatures();
+  if (natures.length === 0) {
+    throw new Error("性格データを取得できませんでした。");
+  }
+
+  return natures[Math.floor(Math.random() * natures.length)];
+}
+
 function includesResource(resources: NamedResource[], typeName: string): boolean {
   return resources.some((resource) => resource.name === typeName);
 }
@@ -384,12 +685,12 @@ export async function fetchPokemonQuizData(
     species.flavor_text_entries
       .filter((entry) => entry.language.name === "ja-Hrkt" || entry.language.name === "ja")
       .map((entry) => cleanFlavorText(entry.flavor_text))
-      .find(Boolean) ?? "PokeAPIに日本語の図鑑説明が登録されていません";
+      .find(Boolean) ?? NO_INFORMATION;
 
   const genusJa =
     species.genera.find((entry) => entry.language.name === "ja-Hrkt")?.genus ??
     species.genera.find((entry) => entry.language.name === "ja")?.genus ??
-    "分類不明";
+    NO_INFORMATION;
 
   return {
     id: species.id,
@@ -398,6 +699,7 @@ export async function fetchPokemonQuizData(
     displayNameHira,
     spriteUrl,
     artworkUrl,
+    typeNamesApi,
     typesJa,
     abilitiesJa,
     heightM: pokemon.height / 10,
