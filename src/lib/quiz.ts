@@ -42,11 +42,11 @@ export const difficultyLabels: Record<Difficulty, string> = {
 };
 
 export const difficultyDescriptions: Record<Difficulty, string> = {
-  kids: "ひらがなと姿でゆっくり遊べます。はじめての一匹にもやさしいです。",
-  adult: "姿・タイプ・ヒントから当てる標準モードです。記憶の引き出しを軽く開けます。",
-  professor: "分類や図鑑説明から推理します。白衣はなくても参加できます。",
-  trainer: "タイプ相性・技・特性・種族値で戦うバトル知識モードです。目指せ脳内チャンピオンロード。",
-  silhouette: "黒い影から一気に見抜く短期決戦。10問の集中力で勝負します。",
+  kids: "はじめての草むらでも安心。ひらがなと姿を頼りに、のんびり図鑑を埋めます。",
+  adult: "姿・タイプ・ヒントから推理する標準ルート。記憶のボールを軽く投げます。",
+  professor: "分類や図鑑説明から読み解く研究所ルート。白衣がなくても博士気分です。",
+  trainer: "タイプ相性・技・特性・種族値で戦う実戦ルート。目指せ脳内チャンピオンロード。",
+  silhouette: "黒い影から一気に見抜く短期決戦。10問の集中力でカゲを追います。",
 };
 
 export const professorLevelOrder: ProfessorLevel[] = ["apprentice", "training", "exam"];
@@ -318,7 +318,7 @@ async function fetchBattleMoveKnownByPokemon(
     }
   }
 
-  throw new Error("このポケモンが使える条件付きの技を取得できませんでした。");
+  throw new Error("このポケモンが使える条件付きのわざメモを見つけられませんでした。");
 }
 
 async function fetchBattleAbilityForPokemon(pokemon: PokemonQuizData): Promise<BattleAbility> {
@@ -330,7 +330,7 @@ async function fetchBattleAbilityForPokemon(pokemon: PokemonQuizData): Promise<B
     }
   }
 
-  throw new Error("このポケモンの特性データを取得できませんでした。");
+  throw new Error("このポケモンの特性メモを見つけられませんでした。");
 }
 
 function createTrainerKnowledgeRound({
@@ -483,7 +483,7 @@ async function createTypeMatchupRound(
     }
   }
 
-  throw new Error("タイプ相性問題を作成できませんでした。");
+  throw new Error("タイプ相性のバトルメモを作れませんでした。");
 }
 
 async function fetchMoveOptionsForEffectiveness(
@@ -511,7 +511,7 @@ async function fetchMoveOptionsForEffectiveness(
   }
 
   if (!answer) {
-    throw new Error("効果抜群になる技を取得できませんでした。");
+    throw new Error("効果抜群になるわざ候補を見つけられませんでした。");
   }
 
   const wrongMoves: BattleMove[] = [];
@@ -533,7 +533,7 @@ async function fetchMoveOptionsForEffectiveness(
   }
 
   if (wrongMoves.length < 3) {
-    throw new Error("技タイプ相性の選択肢を作成できませんでした。");
+    throw new Error("わざタイプ相性の手持ち候補を作れませんでした。");
   }
 
   return { answer, wrongMoves };
@@ -620,7 +620,7 @@ async function createAbilityDescriptionRound(
   }
 
   if (abilities.length < 4) {
-    throw new Error("特性クイズの選択肢を作成できませんでした。");
+    throw new Error("特性クイズの手持ち候補を作れませんでした。");
   }
 
   return createTrainerKnowledgeRound({
@@ -698,7 +698,7 @@ async function createMoveNumberRound(
   });
   const value = kind === "move-accuracy" ? move.accuracy : move.power;
   if (value === null) {
-    throw new Error("技の数値データを取得できませんでした。");
+    throw new Error("わざの数値メモを見つけられませんでした。");
   }
 
   const accuracyValues = [30, 50, 55, 60, 70, 75, 80, 85, 90, 95, 100];
@@ -758,7 +758,7 @@ async function createStatComparisonRound(
   }
 
   if (!answer || wrongPokemon.length < 3) {
-    throw new Error("比較クイズの選択肢を作成できませんでした。");
+    throw new Error("比較クイズの手持ち候補を作れませんでした。");
   }
 
   const answerValue = getStatValue(answer, stat.key);
@@ -852,7 +852,7 @@ async function createMovePriorityRound(
     });
   }
 
-  throw new Error("技の優先度クイズを作成できませんでした。");
+  throw new Error("わざの優先度メモを作れませんでした。");
 }
 
 async function createTrainerRoundByKind(
@@ -900,7 +900,7 @@ export async function createTrainerQuizRound(
     }
   }
 
-  throw new Error("トレーナークイズを作成できませんでした。");
+  throw new Error("トレーナールートの問題を作れませんでした。");
 }
 
 async function fetchSilhouetteChoicePokemon(
@@ -924,7 +924,7 @@ async function fetchSilhouetteChoicePokemon(
   }
 
   if (choices.length < 4) {
-    throw new Error("シルエット問題の選択肢を作成できませんでした。");
+    throw new Error("シルエット問題の手持ち候補を作れませんでした。");
   }
 
   return shuffle(choices);
@@ -1032,6 +1032,21 @@ export function registerWrongAnswer(round: QuizRound): QuizRound {
   return {
     ...round,
     wrongAttempts,
+    score: calculateRoundScore(round.revealedHints, wrongAttempts),
+  };
+}
+
+export function registerWrongChoiceAnswer(round: QuizRound, answerValue: string): QuizRound {
+  const wrongChoiceValues = round.wrongChoiceValues ?? [];
+  if (wrongChoiceValues.includes(answerValue)) {
+    return round;
+  }
+
+  const wrongAttempts = round.wrongAttempts + 1;
+  return {
+    ...round,
+    wrongAttempts,
+    wrongChoiceValues: [...wrongChoiceValues, answerValue],
     score: calculateRoundScore(round.revealedHints, wrongAttempts),
   };
 }

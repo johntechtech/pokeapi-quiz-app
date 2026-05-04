@@ -123,6 +123,7 @@ export interface QuizRound {
   showPokemonVisual?: boolean;
   forceBlackSilhouette?: boolean;
   hidePokemonVisual?: boolean;
+  wrongChoiceValues?: string[];
   pokemon: PokemonQuizData;
   revealedHints: number;
   wrongAttempts: number;

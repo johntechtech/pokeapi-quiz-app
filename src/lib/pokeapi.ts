@@ -247,6 +247,7 @@ const battleStatKeys: Array<Exclude<StatKey, "hp">> = [
   "special-defense",
   "speed",
 ];
+const selectableBattleStatKeys: StatKey[] = ["hp", ...battleStatKeys];
 
 let battleTypesCache: Promise<BattleType[]> | null = null;
 let battleNaturesCache: Promise<BattleNature[]> | null = null;
@@ -280,7 +281,7 @@ async function fetchJsonCached<T>(url: string): Promise<T> {
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`PokeAPI request failed: ${response.status} ${response.statusText}`);
+    throw new Error(`草むら通信に失敗しました: ${response.status} ${response.statusText}`);
   }
 
   const data = (await response.json()) as T;
@@ -427,8 +428,8 @@ function isCoreTypeName(value: string): value is CoreTypeName {
   return (CORE_TYPE_NAMES as readonly string[]).includes(value);
 }
 
-export function getBattleStatOptions(): Array<{ key: Exclude<StatKey, "hp">; label: string }> {
-  return battleStatKeys.map((key) => ({ key, label: statLabels[key] }));
+export function getBattleStatOptions(): Array<{ key: StatKey; label: string }> {
+  return selectableBattleStatKeys.map((key) => ({ key, label: statLabels[key] }));
 }
 
 export async function getCoreBattleTypes(): Promise<BattleType[]> {
@@ -544,7 +545,7 @@ export async function fetchRandomBattleMove({
     }
   }
 
-  throw new Error("条件に合う技データを取得できませんでした。");
+  throw new Error("条件に合うわざメモを見つけられませんでした。");
 }
 
 function cleanBattleText(value: string): string {
@@ -577,7 +578,7 @@ async function fetchAbilityDetail(nameOrUrl: string): Promise<BattleAbility> {
   const descriptionJa = getAbilityDescriptionJa(ability);
 
   if (!descriptionJa) {
-    throw new Error("特性の説明データを取得できませんでした。");
+    throw new Error("特性の説明メモを見つけられませんでした。");
   }
 
   return {
@@ -614,7 +615,7 @@ export async function fetchRandomBattleAbility(excludeApiNames: string[] = []): 
     }
   }
 
-  throw new Error("条件に合う特性データを取得できませんでした。");
+  throw new Error("条件に合う特性メモを見つけられませんでした。");
 }
 
 async function fetchBattleNatures(): Promise<BattleNature[]> {
@@ -655,7 +656,7 @@ function isBattleStatKey(value: string): value is Exclude<StatKey, "hp"> {
 export async function fetchRandomBattleNature(): Promise<BattleNature> {
   const natures = await fetchBattleNatures();
   if (natures.length === 0) {
-    throw new Error("性格データを取得できませんでした。");
+    throw new Error("性格メモを見つけられませんでした。");
   }
 
   return natures[Math.floor(Math.random() * natures.length)];

@@ -11,6 +11,7 @@ import {
   Medal,
   Play,
   Shield,
+  Timer,
   Trophy,
   User,
   XCircle,
@@ -32,6 +33,7 @@ import {
   professorLevelLabels,
   professorLevelOrder,
   registerWrongAnswer,
+  registerWrongChoiceAnswer,
   revealNextHint,
   shouldShowPokemonImage,
   shouldUseBlackSilhouette,
@@ -89,6 +91,15 @@ const difficultyAccents: Record<Difficulty, string> = {
 };
 
 const difficultyOrder: Difficulty[] = ["kids", "adult", "professor", "trainer", "silhouette"];
+const SILHOUETTE_WRONG_PENALTY_MS = 2000;
+const SILHOUETTE_SKIP_PENALTY_MS = 5000;
+const loadingMessages = [
+  "ポケモンを探しています。",
+  "オーキド博士が問題を作っています。",
+  "草むらをそっと調査中です。",
+  "図鑑のページをめくっています。",
+  "モンスターボールを磨いています。",
+];
 
 const generationOptions: GenerationOption[] = [
   { id: 1, label: "第1世代", games: "赤・緑、青、ピカチュウ", start: 1, end: 151 },
@@ -174,6 +185,19 @@ function formatDate(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatStopwatch(ms: number): string {
+  const safeMs = Math.max(0, ms);
+  const totalSeconds = Math.floor(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const tenths = Math.floor((safeMs % 1000) / 100);
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${tenths}`;
+}
+
+function loadingMessageFor(questionNumber: number): string {
+  return loadingMessages[Math.max(0, questionNumber - 1) % loadingMessages.length];
 }
 
 function formatModeName(
@@ -472,8 +496,8 @@ function GenerationSelector({
         type="button"
       >
         <span>
-          <strong>出題範囲をカスタマイズ</strong>
-          <small>世代を複数選択できます</small>
+          <strong>探す地方をカスタマイズ</strong>
+          <small>複数の地方をまたいで探せます</small>
         </span>
         <CaretDown aria-hidden className="generation-accordion-icon" size={20} weight="bold" />
       </button>
@@ -521,7 +545,7 @@ function RankingPanel({
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-stone-500">RANKING</p>
           <h2 className="mt-1 text-lg font-black text-stone-950">
-            {modeLabel ? `${modeLabel} トップ10` : "ランキング"}
+            {modeLabel ? `${modeLabel} 殿堂入りトップ10` : "殿堂入り記録"}
           </h2>
         </div>
         <Trophy aria-hidden className="text-[#d0a331]" size={26} weight="bold" />
@@ -529,7 +553,7 @@ function RankingPanel({
 
       {entries.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-4 py-6 text-sm text-stone-500">
-          {emptyText ?? (modeLabel ? "まだ記録がありません。" : "モードを選ぶとランキングを表示します。")}
+          {emptyText ?? (modeLabel ? "まだ殿堂入り記録がありません。" : "冒険ルートを選ぶと記録を表示します。")}
         </div>
       ) : (
         <ol className="divide-y divide-stone-100">
@@ -537,9 +561,9 @@ function RankingPanel({
             <li className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 py-3" key={`${entry.completedAt}-${index}`}>
               <span className="font-mono text-sm font-black text-stone-400">{index + 1}</span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-stone-950">{entry.playerName}</p>
+                <p className="break-words text-sm font-bold text-stone-950">{entry.playerName}</p>
                 <p className="text-xs text-stone-500">
-                  {formatElapsed(entry.elapsedMs)} / ヒント {entry.hintsUsed}
+                  {formatElapsed(entry.elapsedMs)} / 図鑑メモ {entry.hintsUsed}
                 </p>
               </div>
               <div className="text-right">
@@ -560,16 +584,16 @@ function UpdateNotes(): ReactElement {
       date: "2026-05-04",
       label: "2026.05.04：",
       items: [
-        "博士モードのヒント順をレベル別に調整し、進化の順番を追加。",
-        "トレーナーモードをバトル知識クイズ専用に変更。",
-        "シルエットタイムアタックを追加。",
+        "博士ルートの図鑑メモ順をレベル別に調整し、進化の順番を追加。",
+        "トレーナールートをバトル知識の実戦メモ専用に変更。",
+        "シルエットタイムアタックを新しい草むらに追加。",
       ],
     },
   ];
 
   return (
-    <section className="update-notes" aria-label="バージョンアップデート">
-      <h2>アップデート情報</h2>
+    <section className="update-notes" aria-label="研究所ノート">
+      <h2>研究所ノート</h2>
       <div className="update-note-list">
         {updates.map((group) => (
           <div className="update-note-group" key={group.date}>
@@ -596,8 +620,8 @@ function FutureIdeas(): ReactElement {
   ];
 
   return (
-    <section className="future-ideas" aria-label="追加コンテンツ案">
-      <h2>追加コンテンツ案</h2>
+    <section className="future-ideas" aria-label="次の冒険メモ">
+      <h2>次の冒険メモ</h2>
       <ul>
         {ideas.map((idea) => (
           <li key={idea}>{idea}</li>
@@ -629,7 +653,7 @@ function ClueList({ clues }: { clues: QuizClue[] }): ReactElement {
                   {clueItem.value}
                 </p>
                 <p className="mt-1 text-xs font-bold leading-5 text-stone-600">
-                  画面上部の姿エリアを確認してください。
+                  画面上部の観察エリアを確認してください。
                 </p>
               </div>
             </div>
@@ -683,7 +707,7 @@ function PokemonVisual({
         />
       ) : (
         <div className="relative z-[1] flex min-h-48 w-full max-w-[18rem] items-center justify-center rounded-full border border-dashed border-stone-300 bg-white/45 px-8 text-center text-sm font-bold leading-6 text-stone-500">
-          {round && !isTextAnswerRound(round) ? "バトル問題を表示中です" : "まだ姿は伏せられています"}
+          {round && !isTextAnswerRound(round) ? "バトルメモを表示中です" : "まだ姿は草むらの中です"}
         </div>
       )}
     </div>
@@ -712,28 +736,45 @@ function NoticeBox({ notice }: { notice: Notice }): ReactElement | null {
 
 function ChoiceButton({
   choice,
+  isWrong,
   onSelect,
 }: {
   choice: QuizChoice;
+  isWrong: boolean;
   onSelect: (value: string) => void;
 }): ReactElement {
+  const tooltipId = `wrong-choice-${choice.value}`;
+
   return (
-    <button
-      className={cx("choice-answer-button", choice.imageUrl && "choice-answer-button-visual")}
-      onClick={() => onSelect(choice.value)}
-      type="button"
-    >
-      {choice.imageUrl && (
-        <img
-          alt={choice.imageAlt ?? choice.label}
-          className={cx("choice-answer-art", choice.imageTone === "black" && "is-black")}
-          draggable={false}
-          src={choice.imageUrl}
-        />
+    <div className="choice-answer-wrap">
+      <button
+        aria-describedby={isWrong ? tooltipId : undefined}
+        className={cx(
+          "choice-answer-button",
+          choice.imageUrl && "choice-answer-button-visual",
+          isWrong && "is-wrong",
+        )}
+        disabled={isWrong}
+        onClick={() => onSelect(choice.value)}
+        type="button"
+      >
+        {choice.imageUrl && (
+          <img
+            alt={choice.imageAlt ?? choice.label}
+            className={cx("choice-answer-art", choice.imageTone === "black" && "is-black")}
+            draggable={false}
+            src={choice.imageUrl}
+          />
+        )}
+        <strong>{choice.label}</strong>
+        {choice.description && <span>{choice.description}</span>}
+      </button>
+      {isWrong && (
+        <div className="choice-answer-tooltip" id={tooltipId} role="tooltip">
+          こうかはいまひとつ。別の選択肢を狙いましょう。
+        </div>
       )}
-      <strong>{choice.label}</strong>
-      {choice.description && <span>{choice.description}</span>}
-    </button>
+    </div>
   );
 }
 
@@ -769,12 +810,15 @@ function AnswerForm({
   if (round.answerFormat === "choice") {
     const useMobileChoiceSelect = round.difficulty === "trainer";
     const hasImageChoices = (round.choices ?? []).some((choice) => Boolean(choice.imageUrl));
+    const wrongChoiceValues = new Set(round.wrongChoiceValues ?? []);
+    const lastWrongChoiceValue = (round.wrongChoiceValues ?? []).at(-1);
+    const lastWrongChoice = (round.choices ?? []).find((choice) => choice.value === lastWrongChoiceValue);
 
     return (
       <Panel className="answer-dock p-5">
         <div className="space-y-4">
           <div>
-            <p className="block text-sm font-black text-stone-950">選択肢</p>
+            <p className="block text-sm font-black text-stone-950">手持ちの選択肢</p>
             {useMobileChoiceSelect && (
               <form className="mobile-choice-select md:hidden" onSubmit={onStructuredSubmit}>
                 <select
@@ -782,16 +826,21 @@ function AnswerForm({
                   onChange={(event) => onSelectedAnswerChange(event.target.value)}
                   value={selectedAnswer}
                 >
-                  <option value="">選択してください</option>
+                  <option value="">手持ちから選んでください</option>
                   {(round.choices ?? []).map((choice) => (
-                    <option key={choice.value} value={choice.value}>
-                      {choice.label}
+                    <option disabled={wrongChoiceValues.has(choice.value)} key={choice.value} value={choice.value}>
+                      {wrongChoiceValues.has(choice.value) ? `${choice.label}（こうかはいまひとつ）` : choice.label}
                     </option>
                   ))}
                 </select>
                 <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
-                  回答
+                  ボールを投げる
                 </IconButton>
+                {lastWrongChoice && (
+                  <div className="choice-answer-tooltip md:hidden" role="tooltip">
+                    こうかはいまひとつ。{lastWrongChoice.label}ではなさそうです。
+                  </div>
+                )}
               </form>
             )}
             <div
@@ -802,13 +851,18 @@ function AnswerForm({
               )}
             >
               {(round.choices ?? []).map((choice) => (
-                <ChoiceButton choice={choice} key={choice.value} onSelect={onChoiceAnswer} />
+                <ChoiceButton
+                  choice={choice}
+                  isWrong={wrongChoiceValues.has(choice.value)}
+                  key={choice.value}
+                  onSelect={onChoiceAnswer}
+                />
               ))}
             </div>
           </div>
           <NoticeBox notice={notice} />
           <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
-            スキップ
+            にげる
           </IconButton>
         </div>
       </Panel>
@@ -821,7 +875,7 @@ function AnswerForm({
         <form className="space-y-4" onSubmit={onStructuredSubmit}>
           <div>
             <label className="block text-sm font-black text-stone-950" htmlFor="structured-answer">
-              答えを選ぶ
+              手持ちから選ぶ
             </label>
             <select
               className="quiz-select mt-2"
@@ -829,7 +883,7 @@ function AnswerForm({
               onChange={(event) => onSelectedAnswerChange(event.target.value)}
               value={selectedAnswer}
             >
-              <option value="">選択してください</option>
+              <option value="">手持ちから選んでください</option>
               {(round.selectOptions ?? []).map((choice) => (
                 <option key={choice.value} value={choice.value}>
                   {choice.label}
@@ -840,10 +894,10 @@ function AnswerForm({
           <NoticeBox notice={notice} />
           <div className="answer-actions grid grid-cols-2 items-end gap-2 md:flex md:flex-wrap md:gap-3">
             <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
-              回答
+              ボールを投げる
             </IconButton>
             <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
-              スキップ
+              にげる
             </IconButton>
           </div>
         </form>
@@ -866,7 +920,7 @@ function AnswerForm({
                 onChange={(event) => onDualAnswerChange({ ...dualAnswer, first: event.target.value })}
                 value={dualAnswer.first}
               >
-                <option value="">選択してください</option>
+                <option value="">能力を選んでください</option>
                 {(round.dualSelect?.firstOptions ?? []).map((choice) => (
                   <option key={choice.value} value={choice.value}>
                     {choice.label}
@@ -884,7 +938,7 @@ function AnswerForm({
                 onChange={(event) => onDualAnswerChange({ ...dualAnswer, second: event.target.value })}
                 value={dualAnswer.second}
               >
-                <option value="">選択してください</option>
+                <option value="">能力を選んでください</option>
                 {(round.dualSelect?.secondOptions ?? []).map((choice) => (
                   <option key={choice.value} value={choice.value}>
                     {choice.label}
@@ -896,10 +950,10 @@ function AnswerForm({
           <NoticeBox notice={notice} />
           <div className="answer-actions grid grid-cols-2 items-end gap-2 md:flex md:flex-wrap md:gap-3">
             <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
-              回答
+              ボールを投げる
             </IconButton>
             <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
-              スキップ
+              にげる
             </IconButton>
           </div>
         </form>
@@ -912,14 +966,14 @@ function AnswerForm({
       <form className="space-y-4" onSubmit={onTextSubmit}>
         <div>
           <label className="block text-sm font-black text-stone-950" htmlFor="answer">
-            ポケモンの名前
+            図鑑に書く名前
           </label>
           <input
             autoComplete="off"
             className="mt-2 min-h-12 w-full rounded-2xl border border-stone-300 bg-white px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-900/10 disabled:bg-stone-100"
             id="answer"
             onChange={(event) => onAnswerChange(event.target.value)}
-            placeholder={round.difficulty === "kids" ? "ひらがなでもOK" : "カタカナでもひらがなでもOK"}
+            placeholder={round.difficulty === "kids" ? "ひらがなでもOK" : "カタカナ・ひらがな・英名でもOK"}
             value={answer}
           />
         </div>
@@ -928,7 +982,7 @@ function AnswerForm({
 
         <div className="answer-actions grid grid-cols-3 items-end gap-2 md:flex md:flex-wrap md:gap-3">
           <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
-            回答
+            ボールを投げる
           </IconButton>
           <div className="hint-action md:contents">
             <div aria-live="polite" className="hint-score-badge md:hidden">
@@ -942,11 +996,11 @@ function AnswerForm({
               onClick={onHint}
               variant="secondary"
             >
-              ヒント
+              図鑑ヒント
             </IconButton>
           </div>
           <IconButton className="max-md:w-full" icon={XCircle} onClick={onSkip} variant="danger">
-            スキップ
+            にげる
           </IconButton>
         </div>
       </form>
@@ -982,10 +1036,10 @@ function RoundResultBanner({
           </span>
           <div className="min-w-0">
             <p className="text-xs font-black uppercase tracking-[0.16em] opacity-80">
-              {result.correct ? "ANSWER CLEAR" : "ANSWER"}
+              {result.correct ? "POKEMON GET" : "POKEDEX ANSWER"}
             </p>
             <h3 className="mt-1 text-4xl font-black leading-none tracking-tight text-stone-950 md:text-5xl">
-              {result.correct ? "正解" : "答え"}
+              {result.correct ? "ゲット" : "答え"}
             </h3>
           </div>
         </div>
@@ -997,19 +1051,42 @@ function RoundResultBanner({
 
       <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
         <div className="min-w-0 rounded-2xl bg-white/70 px-4 py-3">
-          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">ANSWER</p>
-          <p className="mt-1 truncate text-2xl font-black text-stone-950">{result.answer}</p>
+          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">POKEDEX</p>
+          <p className="mt-1 break-words text-2xl font-black leading-tight text-stone-950">{result.answer}</p>
           {result.detail && (
-            <p className="mt-1 text-xs font-bold leading-5 text-stone-600">{result.detail}</p>
+            <p className="mt-1 break-words text-xs font-bold leading-5 text-stone-600">{result.detail}</p>
           )}
         </div>
         <div className="rounded-2xl bg-white/70 px-4 py-3 sm:min-w-36 sm:text-right">
-          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">SCORE</p>
+          <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] opacity-70">BADGE PT</p>
           <p className="mt-1 font-mono text-3xl font-black leading-none text-stone-950">
             {result.score}
             <span className="ml-1 text-sm font-black text-stone-500">pt</span>
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function StopwatchBadge({
+  elapsedMs,
+  active,
+}: {
+  elapsedMs: number;
+  active: boolean;
+}): ReactElement {
+  return (
+    <div
+      aria-label={`シルエットタイムアタックの計測時間は${formatStopwatch(elapsedMs)}です`}
+      className={cx("stopwatch-badge", active && "is-active")}
+    >
+      <div className="stopwatch-icon">
+        <Timer aria-hidden size={18} weight="bold" />
+      </div>
+      <div>
+        <p>タイム</p>
+        <strong>{formatStopwatch(elapsedMs)}</strong>
       </div>
     </div>
   );
@@ -1022,7 +1099,7 @@ function ScoreGauge({ score }: { score: number }): ReactElement {
 
   return (
     <div
-      aria-label={`現在この問題で獲得できる点数は${score}点です`}
+      aria-label={`この問題で今ゲットできるバッジポイントは${score}点です`}
       className="w-full min-w-[14rem] rounded-[1.25rem] border border-stone-300 bg-stone-50 px-4 py-3"
       role="meter"
       aria-valuemin={0}
@@ -1031,7 +1108,7 @@ function ScoreGauge({ score }: { score: number }): ReactElement {
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-bold text-stone-600">今この問題で獲得できるポイント</p>
+          <p className="text-xs font-bold text-stone-600">今ゲットできるバッジポイント</p>
         </div>
         <div className="text-right">
           <span className="font-mono text-2xl font-black leading-none text-stone-950">{score}</span>
@@ -1039,7 +1116,7 @@ function ScoreGauge({ score }: { score: number }): ReactElement {
         </div>
       </div>
       <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-[0.7rem] font-bold text-stone-500">ヒントで減少</span>
+        <span className="text-[0.7rem] font-bold text-stone-500">メモ・誤答で減少</span>
         <div className="flex gap-1" aria-hidden="true">
           {Array.from({ length: 6 }).map((_, index) => (
             <span
@@ -1080,8 +1157,9 @@ export default function App(): ReactElement {
   const [notice, setNotice] = useState<Notice>(null);
   const [totalScore, setTotalScore] = useState(0);
   const [totalHints, setTotalHints] = useState(0);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [finishedAt, setFinishedAt] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [roundStartedAt, setRoundStartedAt] = useState<number | null>(null);
+  const [stopwatchTick, setStopwatchTick] = useState(() => Date.now());
   const [playerName, setPlayerName] = useState("");
   const [saved, setSaved] = useState(false);
   const [rankings, setRankings] = useState(loadRankings);
@@ -1096,7 +1174,8 @@ export default function App(): ReactElement {
     () => speciesIdsForGenerations(selectedGenerationIds),
     [selectedGenerationIds],
   );
-  const elapsedMs = finishedAt && startedAt ? finishedAt - startedAt : 0;
+  const liveElapsedMs =
+    elapsedMs + (status === "playing" && roundStartedAt ? Math.max(0, stopwatchTick - roundStartedAt) : 0);
   const hasSelectedModeLevel = Boolean(
     difficulty &&
       (difficulty !== "professor" || professorLevel) &&
@@ -1119,11 +1198,11 @@ export default function App(): ReactElement {
   const activeRankingLabel = formatRankingName(difficulty, professorLevel, trainerLevel, silhouetteLevel);
   const rankingEmptyText =
     difficulty === "professor" && !professorLevel
-      ? "博士モードのレベルを選ぶとランキングを表示します。"
+      ? "博士ルートのレベルを選ぶと殿堂入り記録を表示します。"
       : difficulty === "trainer" && !trainerLevel
-        ? "トレーナーモードのレベルを選ぶとランキングを表示します。"
+        ? "トレーナールートのレベルを選ぶと殿堂入り記録を表示します。"
         : difficulty === "silhouette" && !silhouetteLevel
-          ? "シルエットタイムアタックのレベルを選ぶとランキングを表示します。"
+          ? "シルエットタイムアタックのレベルを選ぶと殿堂入り記録を表示します。"
       : undefined;
   const activeModeName =
     difficulty && hasSelectedModeLevel ? formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel) : null;
@@ -1131,12 +1210,13 @@ export default function App(): ReactElement {
     ? totalQuestionsForMode(difficulty, professorLevel, trainerLevel, silhouetteLevel)
     : 0;
   const startDisabledReason = !hasSelectedModeLevel
-    ? "モードとレベルを選択してください"
+    ? "冒険するモードとレベルを選んでください"
     : candidateSpeciesIds.length === 0
-      ? "出題範囲を1つ以上選択してください"
+      ? "探す地方を1つ以上選んでください"
       : "";
   const isQuizActive = (status === "playing" || status === "answered") && round !== null && difficulty !== null;
   const canStartGame = hasSelectedModeLevel && candidateSpeciesIds.length > 0;
+  const shouldShowStopwatch = difficulty === "silhouette" && status !== "idle";
 
   useEffect(() => {
     if (!startTooltipVisible) {
@@ -1150,6 +1230,25 @@ export default function App(): ReactElement {
     return () => window.clearTimeout(timeoutId);
   }, [startTooltipVisible]);
 
+  useEffect(() => {
+    if (status !== "playing" || !roundStartedAt) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setStopwatchTick(Date.now());
+    }, 100);
+
+    return () => window.clearInterval(intervalId);
+  }, [roundStartedAt, status]);
+
+  function settleActiveTimer(extraMs = 0) {
+    const now = Date.now();
+    setElapsedMs((current) => current + (roundStartedAt ? Math.max(0, now - roundStartedAt) : 0) + extraMs);
+    setRoundStartedAt(null);
+    setStopwatchTick(now);
+  }
+
   async function prepareRound(nextQuestionNumber: number, excludedIds: number[]) {
     if (
       !difficulty ||
@@ -1162,6 +1261,8 @@ export default function App(): ReactElement {
     }
 
     setStatus("loading");
+    setRoundStartedAt(null);
+    setStopwatchTick(Date.now());
     setNotice(null);
     setAnswer("");
     setSelectedAnswer("");
@@ -1183,13 +1284,17 @@ export default function App(): ReactElement {
           : createQuizRound(pokemon, difficulty, professorLevel ?? undefined);
       setRound(nextRound);
       setUsedIds([...excludedIds, pokemon.id]);
+      const now = Date.now();
+      setRoundStartedAt(now);
+      setStopwatchTick(now);
       setStatus("playing");
     } catch (error) {
       setRound(null);
       setStatus("error");
+      setRoundStartedAt(null);
       setNotice({
         tone: "error",
-        text: error instanceof Error ? error.message : "PokeAPIからデータを取得できませんでした。",
+        text: error instanceof Error ? error.message : "草むらの奥でデータを見失いました。もう一度探してください。",
       });
     }
   }
@@ -1201,8 +1306,9 @@ export default function App(): ReactElement {
 
     setTotalScore(0);
     setTotalHints(0);
-    setStartedAt(Date.now());
-    setFinishedAt(null);
+    setElapsedMs(0);
+    setRoundStartedAt(null);
+    setStopwatchTick(Date.now());
     setUsedIds([]);
     setAnswer("");
     setSelectedAnswer("");
@@ -1264,8 +1370,9 @@ export default function App(): ReactElement {
     setNotice(null);
     setTotalScore(0);
     setTotalHints(0);
-    setStartedAt(null);
-    setFinishedAt(null);
+    setElapsedMs(0);
+    setRoundStartedAt(null);
+    setStopwatchTick(Date.now());
     setPlayerName("");
     setSaved(false);
     setLastAnswer(null);
@@ -1292,7 +1399,7 @@ export default function App(): ReactElement {
     }
 
     if (round.revealedHints >= round.maxHints) {
-      setNotice({ tone: "info", text: "この問題のヒントはここまでです。" });
+      setNotice({ tone: "info", text: "オーキド博士のメモはここまでです。" });
       return;
     }
 
@@ -1302,12 +1409,13 @@ export default function App(): ReactElement {
   }
 
   function finishRound(correct: boolean, score: number, answerLabel: string, detail?: string) {
+    settleActiveTimer();
     setTotalScore((current) => current + score);
     setTotalHints((current) => current + (round?.revealedHints ?? 0));
     setStatus("answered");
     setNotice({
       tone: correct ? "success" : "info",
-      text: correct ? `正解！${score}点獲得しました。` : `答えは ${answerLabel} でした。`,
+      text: correct ? `ゲット！${score}ptを記録しました。` : `図鑑の答えは ${answerLabel} でした。`,
     });
     setLastAnswer({ correct, score, answer: answerLabel, detail });
     scrollToQuizTop();
@@ -1320,7 +1428,7 @@ export default function App(): ReactElement {
     }
 
     if (!answer.trim()) {
-      setNotice({ tone: "error", text: "ポケモンの名前を入力してください。" });
+      setNotice({ tone: "error", text: "図鑑に書くポケモン名を入力してください。" });
       return;
     }
 
@@ -1328,7 +1436,10 @@ export default function App(): ReactElement {
       const nextRound = registerWrongAnswer(round);
       const scoreLoss = round.score - nextRound.score;
       setRound(nextRound);
-      setNotice({ tone: "error", text: scoreLoss > 0 ? `まだ違います。-${scoreLoss}点` : "まだ違います。" });
+      setNotice({
+        tone: "error",
+        text: scoreLoss > 0 ? `草むらがざわついています。まだ違うようです。-${scoreLoss}pt` : "草むらがざわついています。まだ違うようです。",
+      });
       return;
     }
 
@@ -1341,13 +1452,30 @@ export default function App(): ReactElement {
       return;
     }
 
+    if (round.wrongChoiceValues?.includes(value)) {
+      return;
+    }
+
     const correct = isCorrectStructuredAnswer(round, value);
-    finishRound(
-      correct,
-      correct ? 100 : 0,
-      round.correctAnswerLabel ?? round.answer,
-      correct ? round.resultDetail : round.resultDetail ?? "次は読み勝ちましょう。",
-    );
+    if (correct) {
+      finishRound(true, round.score, round.correctAnswerLabel ?? round.answer, round.resultDetail);
+      return;
+    }
+
+    const nextRound = registerWrongChoiceAnswer(round, value);
+    const scoreLoss = round.score - nextRound.score;
+    const selectedChoice = round.choices?.find((choice) => choice.value === value);
+    const penaltyText = round.difficulty === "silhouette" ? " / +2秒" : "";
+    if (round.difficulty === "silhouette") {
+      setElapsedMs((current) => current + SILHOUETTE_WRONG_PENALTY_MS);
+    }
+
+    setRound(nextRound);
+    setSelectedAnswer("");
+    setNotice({
+      tone: "error",
+      text: `こうかはいまひとつ！${selectedChoice ? ` ${selectedChoice.label}ではなさそうです。` : " 別の選択肢を狙いましょう。"}${scoreLoss > 0 ? `-${scoreLoss}pt` : ""}${penaltyText}`,
+    });
   }
 
   function handleStructuredAnswer(event: FormEvent<HTMLFormElement>) {
@@ -1357,32 +1485,35 @@ export default function App(): ReactElement {
     }
 
     if (round.answerFormat === "select" && !selectedAnswer) {
-      setNotice({ tone: "error", text: "答えを選択してください。" });
+      setNotice({ tone: "error", text: "手持ちから答えを選んでください。" });
       return;
     }
 
     if (round.answerFormat === "choice" && !selectedAnswer) {
-      setNotice({ tone: "error", text: "答えを選択してください。" });
+      setNotice({ tone: "error", text: "手持ちから答えを選んでください。" });
       return;
     }
 
     if (round.answerFormat === "dual-select" && (!dualAnswer.first || !dualAnswer.second)) {
-      setNotice({ tone: "error", text: "上がる能力と下がる能力を選択してください。" });
+      setNotice({ tone: "error", text: "上がる能力と下がる能力を選んでください。" });
+      return;
+    }
+
+    if (round.answerFormat === "choice") {
+      handleChoiceAnswer(selectedAnswer);
       return;
     }
 
     const correct =
       round.answerFormat === "dual-select"
         ? isCorrectStructuredAnswer(round, dualAnswer.first, dualAnswer.second)
-        : round.answerFormat === "choice"
-          ? isCorrectStructuredAnswer(round, selectedAnswer)
         : isCorrectStructuredAnswer(round, selectedAnswer);
 
     finishRound(
       correct,
       correct ? 100 : 0,
       round.correctAnswerLabel ?? round.answer,
-      correct ? round.resultDetail : round.resultDetail ?? "バトルの読み筋、もう一回磨けます。",
+      correct ? round.resultDetail : round.resultDetail ?? "バトルの読み筋、もう一度ジムで磨けます。",
     );
   }
 
@@ -1392,8 +1523,12 @@ export default function App(): ReactElement {
     }
 
     setTotalHints((current) => current + round.revealedHints);
+    settleActiveTimer(round.difficulty === "silhouette" ? SILHOUETTE_SKIP_PENALTY_MS : 0);
     setStatus("answered");
-    setNotice({ tone: "info", text: `答えは ${round.correctAnswerLabel ?? round.pokemon.displayNameJa} でした。` });
+    setNotice({
+      tone: "info",
+      text: `野生の問題からにげました。図鑑の答えは ${round.correctAnswerLabel ?? round.pokemon.displayNameJa} でした。${round.difficulty === "silhouette" ? " +5秒" : ""}`,
+    });
     setLastAnswer({
       correct: false,
       score: 0,
@@ -1405,7 +1540,7 @@ export default function App(): ReactElement {
 
   function goNext() {
     if (questionNumber >= totalQuestions) {
-      setFinishedAt(Date.now());
+      setRoundStartedAt(null);
       setRound(null);
       setStatus("finished");
       setNotice(null);
@@ -1436,10 +1571,10 @@ export default function App(): ReactElement {
       professorLevel: difficulty === "professor" ? professorLevel ?? undefined : undefined,
       trainerLevel: difficulty === "trainer" ? trainerLevel ?? undefined : undefined,
       silhouetteLevel: difficulty === "silhouette" ? silhouetteLevel ?? undefined : undefined,
-      playerName: playerName.trim() || "プレイヤー",
+      playerName: playerName.trim() || "ななしのトレーナー",
       score: totalScore,
       hintsUsed: totalHints,
-      elapsedMs,
+      elapsedMs: liveElapsedMs,
       completedAt: new Date().toISOString(),
     };
     setRankings(saveRankingEntry(entry));
@@ -1462,9 +1597,9 @@ export default function App(): ReactElement {
           )}
         >
           <div className={cx(isQuizActive && "max-md:hidden")}>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a563c]">PokeAPI Quiz</p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a563c]">OAK LAB QUIZ</p>
             <h1 className="mt-2 max-w-3xl text-4xl font-black leading-none tracking-tight text-stone-950 md:text-6xl">
-              ポケモンを当てる。
+              図鑑を埋める冒険へ。
             </h1>
           </div>
           {isQuizActive && round && difficulty && (
@@ -1481,14 +1616,20 @@ export default function App(): ReactElement {
                 </h2>
               </div>
               <IconButton className="quiz-mobile-home" icon={House} onClick={returnHome} variant="ghost">
-                ホームへ戻る
+                研究所へ戻る
               </IconButton>
             </div>
           )}
           {status !== "idle" && (
-            <div className={cx("grid grid-cols-3 gap-2 text-sm md:min-w-[22rem]", isQuizActive && "quiz-mobile-stats")}>
+            <div
+              className={cx(
+                "grid gap-2 text-sm md:min-w-[22rem]",
+                shouldShowStopwatch ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3",
+                isQuizActive && "quiz-mobile-stats",
+              )}
+            >
               <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
-                <p className="text-xs font-bold text-stone-500">問題</p>
+                <p className="text-xs font-bold text-stone-500">問</p>
                 <p className="font-mono text-xl font-black">{questionNumber || 0}/{totalQuestions || 0}</p>
               </div>
               <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
@@ -1496,9 +1637,12 @@ export default function App(): ReactElement {
                 <p className="font-mono text-xl font-black">{totalScore}</p>
               </div>
               <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
-                <p className="text-xs font-bold text-stone-500">ヒント</p>
+                <p className="text-xs font-bold text-stone-500">図鑑</p>
                 <p className="font-mono text-xl font-black">{totalHints}</p>
               </div>
+              {shouldShowStopwatch && (
+                <StopwatchBadge active={status === "playing"} elapsedMs={liveElapsedMs} />
+              )}
             </div>
           )}
         </header>
@@ -1509,12 +1653,12 @@ export default function App(): ReactElement {
               <Panel className="p-5 md:p-7">
                 <div className="mb-5">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">DIFFICULTY</p>
-                    <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">レベルを選ぶ</h2>
+                    <p className="text-xs font-black uppercase tracking-[0.18em] text-stone-500">ADVENTURE ROUTE</p>
+                    <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">冒険ルートを選ぶ</h2>
                   </div>
                 </div>
                 <div className="generation-count" aria-live="polite">
-                  <span>対象</span>
+                  <span>草むら</span>
                   <strong>{candidateSpeciesIds.length}</strong>
                   <span>匹</span>
                 </div>
@@ -1549,7 +1693,7 @@ export default function App(): ReactElement {
               <div className="h-6 w-40 animate-pulse rounded-full bg-stone-300" />
               <div className="h-28 animate-pulse rounded-[1.5rem] bg-white" />
               <div className="h-12 animate-pulse rounded-full bg-stone-300" />
-              <p className="text-sm font-bold text-stone-500">PokeAPIからポケモンをセットしています。</p>
+              <p className="text-sm font-bold text-stone-500">{loadingMessageFor(questionNumber)}</p>
             </div>
           </Panel>
         )}
@@ -1560,7 +1704,7 @@ export default function App(): ReactElement {
               <XCircle aria-hidden className="mx-auto text-[#9a563c]" size={44} weight="bold" />
               <NoticeBox notice={notice} />
               <IconButton icon={ArrowClockwise} onClick={retryLoad}>
-                もう一度取得する
+                もう一度探す
               </IconButton>
             </div>
           </Panel>
@@ -1580,7 +1724,7 @@ export default function App(): ReactElement {
                     <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-stone-500 md:text-xs md:tracking-[0.18em]">
                       QUESTION {questionNumber}
                     </p>
-                    <h2 className="mt-0.5 truncate text-base font-black tracking-tight text-stone-950 md:mt-1 md:text-2xl">
+                    <h2 className="mt-0.5 break-words text-base font-black tracking-tight text-stone-950 md:mt-1 md:text-2xl">
                       {formatModeName(
                         difficulty,
                         round.professorLevel ?? professorLevel,
@@ -1599,7 +1743,7 @@ export default function App(): ReactElement {
                       onClick={returnHome}
                       variant="ghost"
                     >
-                      ホームへ戻る
+                      研究所へ戻る
                     </IconButton>
                   </div>
                 </div>
@@ -1609,7 +1753,7 @@ export default function App(): ReactElement {
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-xl font-black text-stone-950">
-                      {isTextAnswerRound(round) ? "ヒント" : "問題情報"}
+                      {isTextAnswerRound(round) ? "図鑑メモ" : "バトルメモ"}
                     </h3>
                   </div>
                   <Eye aria-hidden className="text-[#5aa89c]" size={26} weight="bold" />
@@ -1629,7 +1773,7 @@ export default function App(): ReactElement {
               {status === "answered" && lastAnswer && (
                 <RoundResultBanner
                   actionIcon={questionNumber >= totalQuestions ? Trophy : Play}
-                  actionLabel={questionNumber >= totalQuestions ? "結果を見る" : "次の問題"}
+                  actionLabel={questionNumber >= totalQuestions ? "殿堂入りを見る" : "次の草むらへ"}
                   onAction={goNext}
                   result={lastAnswer}
                 />
@@ -1666,13 +1810,13 @@ export default function App(): ReactElement {
             <Panel className="p-6 md:p-8">
               <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a563c]">RESULT</p>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a563c]">HALL OF FAME</p>
                   <h2 className="mt-3 text-4xl font-black leading-none tracking-tight text-stone-950 md:text-6xl">
                     {totalScore} / {totalQuestions * 100}
                   </h2>
                   <p className="mt-4 text-sm font-bold leading-6 text-stone-600">
-                    {formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel)}を完走しました。ヒント {totalHints} 回、
-                    タイム {formatElapsed(elapsedMs)}。
+                    {formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel)}の調査完了。図鑑メモ {totalHints} 回、
+                    タイム {formatElapsed(liveElapsedMs)}。
                   </p>
                 </div>
                 <Trophy aria-hidden className="text-[#d0a331]" size={54} weight="fill" />
@@ -1680,7 +1824,7 @@ export default function App(): ReactElement {
 
               <div className="mt-8 max-w-xl">
                 <label className="block text-sm font-black text-stone-950" htmlFor="playerName">
-                  プレイヤー名
+                  トレーナー名
                 </label>
                 <div className="mt-2 flex flex-col gap-3 sm:flex-row">
                   <div className="relative flex-1">
@@ -1696,22 +1840,22 @@ export default function App(): ReactElement {
                       id="playerName"
                       maxLength={24}
                       onChange={(event) => setPlayerName(event.target.value)}
-                      placeholder="プレイヤー"
+                      placeholder="ななしのトレーナー"
                       value={playerName}
                     />
                   </div>
                   <IconButton disabled={saved} icon={FloppyDisk} onClick={saveResult}>
-                    {saved ? "保存済み" : "保存"}
+                    {saved ? "記録済み" : "記録する"}
                   </IconButton>
                 </div>
               </div>
 
               <div className="mt-8 flex flex-wrap gap-3">
                 <IconButton icon={ArrowClockwise} onClick={startGame} variant="secondary">
-                  同じレベルでもう一度
+                  同じ道をもう一度
                 </IconButton>
                 <IconButton icon={Shield} onClick={returnHome} variant="ghost">
-                  レベル選択へ
+                  研究所へ戻る
                 </IconButton>
               </div>
             </Panel>
@@ -1736,7 +1880,7 @@ export default function App(): ReactElement {
                 onClick={handleStartButtonClick}
                 variant="cta"
               >
-                クイズをはじめる
+                草むらへ出発
               </IconButton>
             </div>
           </div>
