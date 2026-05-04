@@ -59,10 +59,23 @@ interface PokemonSpeciesResponse {
     language: NamedResource;
   }>;
   generation: NamedResource;
+  evolution_chain: {
+    url: string;
+  };
   varieties: Array<{
     is_default: boolean;
     pokemon: NamedResource;
   }>;
+}
+
+interface EvolutionChainLink {
+  species: NamedResource;
+  evolves_to: EvolutionChainLink[];
+}
+
+interface EvolutionChainResponse {
+  id: number;
+  chain: EvolutionChainLink;
 }
 
 interface PokemonResponse {
@@ -296,6 +309,39 @@ function generationToJa(name: string): string {
   return generationLabels[name] ?? name;
 }
 
+function collectEvolutionPaths(link: EvolutionChainLink): string[][] {
+  if (link.evolves_to.length === 0) {
+    return [[link.species.name]];
+  }
+
+  return link.evolves_to.flatMap((nextLink) =>
+    collectEvolutionPaths(nextLink).map((path) => [link.species.name, ...path]),
+  );
+}
+
+async function fetchEvolutionOrderJa(species: PokemonSpeciesResponse): Promise<string> {
+  try {
+    const evolution = await fetchJsonCached<EvolutionChainResponse>(species.evolution_chain.url);
+    const paths = collectEvolutionPaths(evolution.chain)
+      .filter((path) => path.includes(species.name))
+      .sort((a, b) => b.length - a.length);
+    const path = paths[0];
+
+    if (!path) {
+      return NO_INFORMATION;
+    }
+
+    if (path.length <= 1) {
+      return "進化なし";
+    }
+
+    const stageIndex = path.indexOf(species.name) + 1;
+    return `${path.length}段進化の${stageIndex}番目`;
+  } catch {
+    return NO_INFORMATION;
+  }
+}
+
 function mapStats(stats: PokemonResponse["stats"]): PokemonStat[] {
   return stats
     .map((entry) => {
@@ -339,6 +385,13 @@ async function fetchAbilityNames(abilities: PokemonResponse["abilities"]): Promi
   return Array.from(new Set(results));
 }
 
+function abilityApiNames(abilities: PokemonResponse["abilities"]): string[] {
+  return abilities
+    .slice()
+    .sort((a, b) => Number(a.is_hidden) - Number(b.is_hidden) || a.slot - b.slot)
+    .map((entry) => entry.ability.name);
+}
+
 async function fetchMoveNames(moves: PokemonResponse["moves"]): Promise<string[]> {
   const urls = selectMoveUrls(moves);
   const results = await Promise.all(
@@ -349,6 +402,10 @@ async function fetchMoveNames(moves: PokemonResponse["moves"]): Promise<string[]
   );
 
   return Array.from(new Set(results)).slice(0, 4);
+}
+
+function moveApiNames(moves: PokemonResponse["moves"]): string[] {
+  return moves.map((entry) => entry.move.name);
 }
 
 async function fetchTypeDetail(nameOrUrl: string): Promise<TypeResponse> {
@@ -513,6 +570,27 @@ function getAbilityDescriptionJa(ability: AbilityResponse): string {
   );
 }
 
+async function fetchAbilityDetail(nameOrUrl: string): Promise<BattleAbility> {
+  const isUrl = nameOrUrl.startsWith("http");
+  const url = isUrl ? nameOrUrl : `${API_BASE}/ability/${nameOrUrl}`;
+  const ability = await fetchJsonCached<AbilityResponse>(url);
+  const descriptionJa = getAbilityDescriptionJa(ability);
+
+  if (!descriptionJa) {
+    throw new Error("特性の説明データを取得できませんでした。");
+  }
+
+  return {
+    apiName: ability.name,
+    nameJa: getLocalizedName(ability.names, ability.name),
+    descriptionJa,
+  };
+}
+
+export async function fetchBattleAbility(nameOrUrl: string): Promise<BattleAbility> {
+  return fetchAbilityDetail(nameOrUrl);
+}
+
 async function getAbilityCount(): Promise<number> {
   const result = await fetchJsonCached<ResourceListResponse>(`${API_BASE}/ability?limit=1`);
   return result.count;
@@ -525,19 +603,12 @@ export async function fetchRandomBattleAbility(excludeApiNames: string[] = []): 
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      const ability = await fetchJsonCached<AbilityResponse>(
-        `${API_BASE}/ability/${Math.floor(Math.random() * count) + 1}`,
-      );
-      const descriptionJa = getAbilityDescriptionJa(ability);
-      if (!descriptionJa || excluded.has(ability.name)) {
+      const ability = await fetchAbilityDetail(`${Math.floor(Math.random() * count) + 1}`);
+      if (excluded.has(ability.apiName)) {
         continue;
       }
 
-      return {
-        apiName: ability.name,
-        nameJa: getLocalizedName(ability.names, ability.name),
-        descriptionJa,
-      };
+      return ability;
     } catch {
       // Try another ability.
     }
@@ -671,14 +742,17 @@ export async function fetchPokemonQuizData(
 
   const includeProfessorData = options.includeProfessorData ?? true;
   const includeBattleData = options.includeBattleData ?? true;
+  const abilityNamesApi = includeProfessorData || includeBattleData ? abilityApiNames(pokemon.abilities) : [];
+  const moveNamesApi = includeBattleData ? moveApiNames(pokemon.moves) : [];
 
-  const [typesJa, abilitiesJa, moves, matchups] = await Promise.all([
+  const [typesJa, abilitiesJa, moves, matchups, evolutionOrderJa] = await Promise.all([
     Promise.all(typeNamesApi.map((name) => fetchTypeNameJa(name))),
     includeProfessorData || includeBattleData ? fetchAbilityNames(pokemon.abilities) : Promise.resolve([]),
     includeBattleData ? fetchMoveNames(pokemon.moves) : Promise.resolve([]),
     includeBattleData
       ? getTypeMatchups(typeNamesApi)
       : Promise.resolve({ weaknessesJa: [], resistancesJa: [], immunitiesJa: [] }),
+    includeProfessorData ? fetchEvolutionOrderJa(species) : Promise.resolve(NO_INFORMATION),
   ]);
 
   const flavorTextJa =
@@ -701,12 +775,15 @@ export async function fetchPokemonQuizData(
     artworkUrl,
     typeNamesApi,
     typesJa,
+    abilityNamesApi,
     abilitiesJa,
+    moveNamesApi,
     heightM: pokemon.height / 10,
     weightKg: pokemon.weight / 10,
     flavorTextJa,
     genusJa,
     generationJa: generationToJa(species.generation.name),
+    evolutionOrderJa,
     cryUrl: pokemon.cries?.latest ?? pokemon.cries?.legacy ?? "",
     stats: mapStats(pokemon.stats),
     moves,

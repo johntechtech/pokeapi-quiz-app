@@ -1,4 +1,11 @@
-import type { Difficulty, ProfessorLevel, RankingEntry, RankingKey, TrainerLevel } from "./types";
+import type {
+  Difficulty,
+  ProfessorLevel,
+  RankingEntry,
+  RankingKey,
+  SilhouetteLevel,
+  TrainerLevel,
+} from "./types";
 
 const STORAGE_KEY = "poke-quiz-rankings:v1";
 const rankingKeys: RankingKey[] = [
@@ -11,6 +18,8 @@ const rankingKeys: RankingKey[] = [
   "trainer-gym-leader",
   "trainer-elite-four",
   "trainer-champion",
+  "silhouette-kage-searcher",
+  "silhouette-shadow-runner",
 ];
 
 export type RankingStore = Record<RankingKey, RankingEntry[]>;
@@ -26,6 +35,8 @@ function emptyStore(): RankingStore {
     "trainer-gym-leader": [],
     "trainer-elite-four": [],
     "trainer-champion": [],
+    "silhouette-kage-searcher": [],
+    "silhouette-shadow-runner": [],
   };
 }
 
@@ -33,6 +44,7 @@ export function getRankingKey(
   difficulty: Difficulty,
   professorLevel: ProfessorLevel = "exam",
   trainerLevel: TrainerLevel = "gymLeader",
+  silhouetteLevel: SilhouetteLevel = "kageSearcher",
 ): RankingKey {
   if (difficulty === "professor") {
     return `professor-${professorLevel}`;
@@ -49,41 +61,103 @@ export function getRankingKey(
     return keyByLevel[trainerLevel];
   }
 
+  if (difficulty === "silhouette") {
+    const keyByLevel: Record<SilhouetteLevel, RankingKey> = {
+      kageSearcher: "silhouette-kage-searcher",
+      shadowRunner: "silhouette-shadow-runner",
+    };
+
+    return keyByLevel[silhouetteLevel];
+  }
+
   return difficulty;
 }
 
 function metadataForRankingKey(
   key: RankingKey,
-): Pick<RankingEntry, "difficulty" | "professorLevel" | "trainerLevel"> {
+): Pick<RankingEntry, "difficulty" | "professorLevel" | "trainerLevel" | "silhouetteLevel"> {
   if (key === "professor-apprentice") {
-    return { difficulty: "professor", professorLevel: "apprentice", trainerLevel: undefined };
+    return {
+      difficulty: "professor",
+      professorLevel: "apprentice",
+      trainerLevel: undefined,
+      silhouetteLevel: undefined,
+    };
   }
 
   if (key === "professor-training") {
-    return { difficulty: "professor", professorLevel: "training", trainerLevel: undefined };
+    return {
+      difficulty: "professor",
+      professorLevel: "training",
+      trainerLevel: undefined,
+      silhouetteLevel: undefined,
+    };
   }
 
   if (key === "professor-exam") {
-    return { difficulty: "professor", professorLevel: "exam", trainerLevel: undefined };
+    return {
+      difficulty: "professor",
+      professorLevel: "exam",
+      trainerLevel: undefined,
+      silhouetteLevel: undefined,
+    };
   }
 
   if (key === "trainer-masara") {
-    return { difficulty: "trainer", professorLevel: undefined, trainerLevel: "masara" };
+    return {
+      difficulty: "trainer",
+      professorLevel: undefined,
+      trainerLevel: "masara",
+      silhouetteLevel: undefined,
+    };
   }
 
   if (key === "trainer-gym-leader") {
-    return { difficulty: "trainer", professorLevel: undefined, trainerLevel: "gymLeader" };
+    return {
+      difficulty: "trainer",
+      professorLevel: undefined,
+      trainerLevel: "gymLeader",
+      silhouetteLevel: undefined,
+    };
   }
 
   if (key === "trainer-elite-four") {
-    return { difficulty: "trainer", professorLevel: undefined, trainerLevel: "eliteFour" };
+    return {
+      difficulty: "trainer",
+      professorLevel: undefined,
+      trainerLevel: "eliteFour",
+      silhouetteLevel: undefined,
+    };
   }
 
   if (key === "trainer-champion") {
-    return { difficulty: "trainer", professorLevel: undefined, trainerLevel: "champion" };
+    return {
+      difficulty: "trainer",
+      professorLevel: undefined,
+      trainerLevel: "champion",
+      silhouetteLevel: undefined,
+    };
   }
 
-  return { difficulty: key, professorLevel: undefined, trainerLevel: undefined };
+  if (key === "silhouette-kage-searcher") {
+    return {
+      difficulty: "silhouette",
+      professorLevel: undefined,
+      trainerLevel: undefined,
+      silhouetteLevel: "kageSearcher",
+    };
+  }
+
+  if (key === "silhouette-shadow-runner") {
+    return {
+      difficulty: "silhouette",
+      professorLevel: undefined,
+      trainerLevel: undefined,
+      silhouetteLevel: "shadowRunner",
+    };
+  }
+
+  return { difficulty: key, professorLevel: undefined, trainerLevel: undefined, silhouetteLevel: undefined };
 }
 
 function normalizeEntry(entry: RankingEntry, key: RankingKey): RankingEntry | null {
@@ -146,13 +220,15 @@ export function loadRankings(): RankingStore {
 
 export function saveRankingEntry(entry: RankingEntry): RankingStore {
   const store = loadRankings();
-  const key = getRankingKey(entry.difficulty, entry.professorLevel, entry.trainerLevel);
+  const key = getRankingKey(entry.difficulty, entry.professorLevel, entry.trainerLevel, entry.silhouetteLevel);
   const normalizedEntry =
     entry.difficulty === "professor"
-      ? { ...entry, professorLevel: entry.professorLevel ?? "exam", trainerLevel: undefined }
+      ? { ...entry, professorLevel: entry.professorLevel ?? "exam", trainerLevel: undefined, silhouetteLevel: undefined }
       : entry.difficulty === "trainer"
-        ? { ...entry, professorLevel: undefined, trainerLevel: entry.trainerLevel ?? "gymLeader" }
-        : { ...entry, professorLevel: undefined, trainerLevel: undefined };
+        ? { ...entry, professorLevel: undefined, trainerLevel: entry.trainerLevel ?? "gymLeader", silhouetteLevel: undefined }
+        : entry.difficulty === "silhouette"
+          ? { ...entry, professorLevel: undefined, trainerLevel: undefined, silhouetteLevel: entry.silhouetteLevel ?? "kageSearcher" }
+          : { ...entry, professorLevel: undefined, trainerLevel: undefined, silhouetteLevel: undefined };
 
   store[key] = sortEntries([...store[key], normalizedEntry]);
 
