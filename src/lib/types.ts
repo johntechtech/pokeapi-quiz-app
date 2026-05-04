@@ -1,8 +1,8 @@
-export type Difficulty = "kids" | "adult" | "professor" | "trainer";
+export type Difficulty = "kids" | "adult" | "professor" | "trainer" | "silhouette";
 export type ProfessorLevel = "apprentice" | "training" | "exam";
 export type TrainerLevel = "masara" | "gymLeader" | "eliteFour" | "champion";
+export type SilhouetteLevel = "kageSearcher" | "shadowRunner";
 export type TrainerQuestionKind =
-  | "pokemon-guess"
   | "type-matchup"
   | "move-effectiveness"
   | "move-type"
@@ -22,7 +22,9 @@ export type RankingKey =
   | "trainer-masara"
   | "trainer-gym-leader"
   | "trainer-elite-four"
-  | "trainer-champion";
+  | "trainer-champion"
+  | "silhouette-kage-searcher"
+  | "silhouette-shadow-runner";
 
 export type StatKey =
   | "hp"
@@ -53,12 +55,15 @@ export interface PokemonQuizData {
   artworkUrl: string;
   typeNamesApi: string[];
   typesJa: string[];
+  abilityNamesApi: string[];
   abilitiesJa: string[];
+  moveNamesApi: string[];
   heightM: number;
   weightKg: number;
   flavorTextJa: string;
   genusJa: string;
   generationJa: string;
+  evolutionOrderJa: string;
   cryUrl: string;
   stats: PokemonStat[];
   moves: string[];
@@ -78,6 +83,9 @@ export interface QuizChoice {
   value: string;
   label: string;
   description?: string;
+  imageUrl?: string;
+  imageAlt?: string;
+  imageTone?: "color" | "black";
 }
 
 export interface QuizPrompt {
@@ -98,6 +106,7 @@ export interface QuizRound {
   difficulty: Difficulty;
   professorLevel?: ProfessorLevel;
   trainerLevel?: TrainerLevel;
+  silhouetteLevel?: SilhouetteLevel;
   trainerQuestionKind?: TrainerQuestionKind;
   answerFormat: AnswerFormat;
   prompt?: QuizPrompt;
@@ -112,11 +121,14 @@ export interface QuizRound {
   correctAnswerLabel?: string;
   resultDetail?: string;
   showPokemonVisual?: boolean;
+  forceBlackSilhouette?: boolean;
+  hidePokemonVisual?: boolean;
   pokemon: PokemonQuizData;
   revealedHints: number;
   wrongAttempts: number;
   initialClues: QuizClue[];
   hintClues: QuizClue[];
+  hintClueGroups?: QuizClue[][];
   maxHints: number;
   score: number;
 }
@@ -125,6 +137,7 @@ export interface RankingEntry {
   difficulty: Difficulty;
   professorLevel?: ProfessorLevel;
   trainerLevel?: TrainerLevel;
+  silhouetteLevel?: SilhouetteLevel;
   playerName: string;
   score: number;
   hintsUsed: number;

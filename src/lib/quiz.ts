@@ -2,6 +2,8 @@ import {
   CORE_TYPE_NAMES,
   NO_INFORMATION,
   calculateAttackMultiplier,
+  fetchBattleAbility,
+  fetchBattleMove,
   fetchBattleMovesByNames,
   fetchRandomBattleAbility,
   fetchRandomBattleMove,
@@ -23,18 +25,20 @@ import type {
   QuizChoice,
   QuizClue,
   QuizRound,
+  SilhouetteLevel,
   StatKey,
   TrainerLevel,
   TrainerQuestionKind,
 } from "./types";
 
-export const TOTAL_QUESTIONS = 8;
+export const DEFAULT_TOTAL_QUESTIONS = 8;
 
 export const difficultyLabels: Record<Difficulty, string> = {
   kids: "キッズ",
   adult: "大人",
   professor: "博士",
   trainer: "トレーナー",
+  silhouette: "シルエットTA",
 };
 
 export const difficultyDescriptions: Record<Difficulty, string> = {
@@ -42,6 +46,7 @@ export const difficultyDescriptions: Record<Difficulty, string> = {
   adult: "姿・タイプ・ヒントから当てる標準モードです。記憶の引き出しを軽く開けます。",
   professor: "分類や図鑑説明から推理します。白衣はなくても参加できます。",
   trainer: "タイプ相性・技・特性・種族値で戦うバトル知識モードです。目指せ脳内チャンピオンロード。",
+  silhouette: "黒い影から一気に見抜く短期決戦。10問の集中力で勝負します。",
 };
 
 export const professorLevelOrder: ProfessorLevel[] = ["apprentice", "training", "exam"];
@@ -53,9 +58,9 @@ export const professorLevelLabels: Record<ProfessorLevel, string> = {
 };
 
 export const professorLevelDescriptions: Record<ProfessorLevel, string> = {
-  apprentice: "分類・図鑑説明・名前からじっくり推理",
-  training: "鳴き声と名前を手がかりに絞り込む",
-  exam: "現行博士モードのまま挑む本番",
+  apprentice: "情報多めの7問。分類・説明・タイプからじっくり推理",
+  training: "基礎データを読み切る10問。進化順まで観察します",
+  exam: "鳴き声も含む13問。最後まで博士らしく読み切ります",
 };
 
 export const trainerLevelOrder: TrainerLevel[] = ["masara", "gymLeader", "eliteFour", "champion"];
@@ -68,11 +73,55 @@ export const trainerLevelLabels: Record<TrainerLevel, string> = {
 };
 
 export const trainerLevelDescriptions: Record<TrainerLevel, string> = {
-  masara: "タイプ相性の入口。まずは草むら一歩目から。",
-  gymLeader: "技・特性まで見る実戦入門。バッジは気持ち多めで。",
-  eliteFour: "性格補正と相性を読む上級戦。回復アイテムは心の中に。",
-  champion: "種族値・命中・威力・優先度で勝負。知識の殿堂入りへ。",
+  masara: "7問でタイプ相性の入口。まずは草むら一歩目から。",
+  gymLeader: "9問で技・特性まで見る実戦入門。バッジは気持ち多めで。",
+  eliteFour: "11問で性格補正と相性を読む上級戦。回復アイテムは心の中に。",
+  champion: "13問で全形式に挑む総力戦。知識の殿堂入りへ。",
 };
+
+export const silhouetteLevelOrder: SilhouetteLevel[] = ["kageSearcher", "shadowRunner"];
+
+export const silhouetteLevelLabels: Record<SilhouetteLevel, string> = {
+  kageSearcher: "カゲサーチャー",
+  shadowRunner: "シャドウランナー",
+};
+
+export const silhouetteLevelDescriptions: Record<SilhouetteLevel, string> = {
+  kageSearcher: "名前を見て、4つの黒シルエットから姿を探す10問",
+  shadowRunner: "黒シルエットだけを見て、4つの名前から選ぶ10問",
+};
+
+export function totalQuestionsForMode(
+  difficulty: Difficulty,
+  professorLevel?: ProfessorLevel | null,
+  trainerLevel?: TrainerLevel | null,
+  silhouetteLevel?: SilhouetteLevel | null,
+): number {
+  if (difficulty === "professor") {
+    const counts: Record<ProfessorLevel, number> = {
+      apprentice: 7,
+      training: 10,
+      exam: 13,
+    };
+    return counts[professorLevel ?? "exam"];
+  }
+
+  if (difficulty === "trainer") {
+    const counts: Record<TrainerLevel, number> = {
+      masara: 7,
+      gymLeader: 9,
+      eliteFour: 11,
+      champion: 13,
+    };
+    return counts[trainerLevel ?? "gymLeader"];
+  }
+
+  if (difficulty === "silhouette") {
+    return 10;
+  }
+
+  return DEFAULT_TOTAL_QUESTIONS;
+}
 
 export function calculateRoundScore(hintsUsed: number, wrongAttempts = 0): number {
   const hintAdjustedScore = Math.max(20, 100 - hintsUsed * 15);
@@ -162,7 +211,8 @@ function professorFacts(pokemon: PokemonQuizData): Record<string, QuizClue> {
     types: clue("professor-types", "タイプ", pokemon.typesJa.join(" / ") || NO_INFORMATION),
     flavor: clue("professor-flavor", "図鑑説明", pokemon.flavorTextJa || NO_INFORMATION),
     genus: clue("professor-genus", "分類", pokemon.genusJa || NO_INFORMATION),
-    generation: clue("professor-generation", "追加世代", pokemon.generationJa || NO_INFORMATION),
+    generation: clue("professor-generation", "世代", pokemon.generationJa || NO_INFORMATION),
+    evolution: clue("professor-evolution", "進化の順番", pokemon.evolutionOrderJa || NO_INFORMATION),
     cry: cryClue,
   };
 }
@@ -175,34 +225,30 @@ function createProfessorRound(
   const nameClue = clue("professor-mask", "なまえ", maskName(pokemon.displayNameJa, 0), "name");
   const silhouetteClue = clue("professor-silhouette", "すがた", "シルエットが表示されました", "image");
   let initialClues: QuizClue[];
-  let hintClues: QuizClue[];
+  let hintClueGroups: QuizClue[][];
 
   if (professorLevel === "apprentice") {
-    initialClues = [facts.genus, facts.flavor, nameClue];
-    hintClues = [
-      facts.size,
-      ...shuffle([facts.id, facts.abilities, facts.types, facts.generation, facts.cry]),
-      silhouetteClue,
+    initialClues = [facts.genus, facts.flavor, nameClue, facts.types, facts.evolution];
+    hintClueGroups = [
+      [facts.generation, facts.id, facts.abilities, facts.size],
+      [silhouetteClue],
     ];
   } else if (professorLevel === "training") {
-    initialClues = [facts.cry, nameClue];
-    hintClues = [
-      ...shuffle([
-        facts.id,
-        facts.size,
-        facts.abilities,
-        facts.types,
-        facts.flavor,
-        facts.genus,
-        facts.generation,
-      ]),
-      silhouetteClue,
+    initialClues = [facts.types, facts.generation, facts.id, facts.abilities, facts.genus, facts.size];
+    hintClueGroups = [
+      [nameClue, facts.flavor],
+      [facts.evolution],
+      [silhouetteClue],
     ];
   } else {
-    const shuffledFacts = shuffle(Object.values(facts));
-    initialClues = [shuffledFacts[0]];
-    hintClues = [...shuffledFacts.slice(1), nameClue, silhouetteClue];
+    initialClues = [facts.cry, nameClue, facts.types];
+    hintClueGroups = [
+      [facts.id, facts.generation, facts.abilities],
+      [facts.flavor],
+      [facts.evolution],
+    ];
   }
+  const hintClues = hintClueGroups.flat();
 
   return {
     answer: pokemon.displayNameJa,
@@ -214,71 +260,21 @@ function createProfessorRound(
     wrongAttempts: 0,
     initialClues,
     hintClues,
-    maxHints: hintClues.length,
+    hintClueGroups,
+    maxHints: hintClueGroups.length,
     score: 100,
   };
 }
 
-function speedBand(speed: number): string {
-  if (speed >= 120) return "かなり速い";
-  if (speed >= 90) return "速い";
-  if (speed >= 60) return "標準的";
-  if (speed >= 35) return "遅め";
-  return "かなり遅い";
-}
-
-function highestStat(pokemon: PokemonQuizData): string {
-  const highest = pokemon.stats.reduce((best, stat) => (stat.value > best.value ? stat : best));
-  return `${highest.labelJa} ${highest.value}`;
-}
-
-function trainerFacts(pokemon: PokemonQuizData): QuizClue[] {
-  const speed = pokemon.stats.find((stat) => stat.key === "speed")?.value ?? 0;
-  const weaknessText = pokemon.matchups.weaknessesJa.slice(0, 8).join(" / ") || "目立った弱点なし";
-  const resistanceParts = [
-    pokemon.matchups.resistancesJa.slice(0, 8).join(" / "),
-    pokemon.matchups.immunitiesJa.length > 0
-      ? `無効: ${pokemon.matchups.immunitiesJa.join(" / ")}`
-      : "",
-  ].filter(Boolean);
-
-  return [
-    clue("trainer-types", "タイプ", pokemon.typesJa.join(" / ") || NO_INFORMATION),
-    clue("trainer-weakness", "弱点", weaknessText),
-    clue("trainer-resistance", "耐性", resistanceParts.join(" / ") || "大きな耐性なし"),
-    clue("trainer-best-stat", "高い能力", highestStat(pokemon)),
-    clue("trainer-speed", "素早さの目安", `${speed}。${speedBand(speed)}ポケモン`),
-    clue("trainer-abilities", "特性", pokemon.abilitiesJa.join(" / ") || NO_INFORMATION),
-    clue("trainer-moves", "覚える技の例", pokemon.moves.join(" / ") || NO_INFORMATION),
-  ];
-}
-
-function createTrainerRound(pokemon: PokemonQuizData): QuizRound {
-  const facts = shuffle(trainerFacts(pokemon));
-  const hintClues = [
-    ...facts.slice(1),
-    clue("trainer-mask", "なまえ", maskName(pokemon.displayNameJa, 0), "name"),
-    clue("trainer-silhouette", "すがた", "シルエットが表示されました", "image"),
-  ];
-
-  return {
-    answer: pokemon.displayNameJa,
-    difficulty: "trainer",
-    trainerLevel: "gymLeader",
-    trainerQuestionKind: "pokemon-guess",
-    answerFormat: "text",
-    pokemon,
-    revealedHints: 0,
-    wrongAttempts: 0,
-    initialClues: [facts[0]],
-    hintClues,
-    maxHints: hintClues.length,
-    score: 100,
-  };
-}
-
-function quizChoice(value: string, label: string, description?: string): QuizChoice {
-  return { value, label, description };
+function quizChoice(
+  value: string,
+  label: string,
+  description?: string,
+  imageUrl?: string,
+  imageAlt?: string,
+  imageTone?: QuizChoice["imageTone"],
+): QuizChoice {
+  return { value, label, description, imageUrl, imageAlt, imageTone };
 }
 
 function getStatValue(pokemon: PokemonQuizData, key: StatKey): number {
@@ -289,67 +285,52 @@ function statsSummary(pokemon: PokemonQuizData): string {
   return pokemon.stats.map((stat) => `${stat.labelJa} ${stat.value}`).join(" / ");
 }
 
-function createTrainerPokemonGuessRound(
+async function fetchBattleMoveKnownByPokemon(
   pokemon: PokemonQuizData,
-  trainerLevel: TrainerLevel,
-): QuizRound {
-  const facts = {
-    types: clue("trainer-types", "タイプ", pokemon.typesJa.join(" / ") || NO_INFORMATION),
-    name: clue("trainer-mask", "なまえ", maskName(pokemon.displayNameJa, 0), "name"),
-    generation: clue("trainer-generation", "世代", pokemon.generationJa || NO_INFORMATION),
-    moves: clue("trainer-moves", "覚える技の例", pokemon.moves.join(" / ") || NO_INFORMATION),
-    abilities: clue("trainer-abilities", "特性", pokemon.abilitiesJa.join(" / ") || NO_INFORMATION),
-    weakness: clue("trainer-weakness", "弱点", pokemon.matchups.weaknessesJa.slice(0, 8).join(" / ") || NO_INFORMATION),
-    resistance: clue(
-      "trainer-resistance",
-      "耐性",
-      [
-        pokemon.matchups.resistancesJa.slice(0, 8).join(" / "),
-        pokemon.matchups.immunitiesJa.length > 0 ? `無効: ${pokemon.matchups.immunitiesJa.join(" / ")}` : "",
-      ]
-        .filter(Boolean)
-        .join(" / ") || NO_INFORMATION,
-    ),
-    bestStat: clue("trainer-best-stat", "高い能力", highestStat(pokemon)),
-    stats: clue("trainer-stats", "種族値", statsSummary(pokemon)),
-    image: clue("trainer-silhouette", "すがた", "シルエットが表示されました", "image"),
-  };
+  {
+    requirePower = false,
+    requireAccuracy = false,
+    candidateNames,
+  }: {
+    requirePower?: boolean;
+    requireAccuracy?: boolean;
+    candidateNames?: string[];
+  } = {},
+): Promise<BattleMove> {
+  const knownMoveNames = candidateNames
+    ? pokemon.moveNamesApi.filter((name) => candidateNames.includes(name))
+    : pokemon.moveNamesApi;
 
-  let initialClues: QuizClue[];
-  let hintClues: QuizClue[];
+  for (const moveName of shuffle(knownMoveNames).slice(0, 72)) {
+    try {
+      const move = await fetchBattleMove(moveName);
+      if (requirePower && move.power === null) {
+        continue;
+      }
 
-  if (trainerLevel === "masara") {
-    initialClues = [facts.types, facts.name, facts.generation];
-    hintClues = [facts.moves, facts.abilities, facts.image];
-  } else if (trainerLevel === "eliteFour") {
-    initialClues = [facts.weakness, facts.resistance, facts.bestStat];
-    hintClues = [facts.types, facts.name, facts.image];
-  } else if (trainerLevel === "champion") {
-    initialClues = [facts.stats];
-    hintClues = [facts.types, facts.abilities, facts.name];
-  } else {
-    initialClues = [facts.types, facts.weakness];
-    hintClues = [facts.bestStat, facts.abilities, facts.name, facts.image];
+      if (requireAccuracy && move.accuracy === null) {
+        continue;
+      }
+
+      return move;
+    } catch {
+      // Try another move known by this Pokemon.
+    }
   }
 
-  return {
-    answer: pokemon.displayNameJa,
-    difficulty: "trainer",
-    trainerLevel,
-    trainerQuestionKind: "pokemon-guess",
-    answerFormat: "text",
-    prompt: {
-      title: "ポケモン当て",
-      body: "バトルで使う情報からポケモン名を当ててください。",
-    },
-    pokemon,
-    revealedHints: 0,
-    wrongAttempts: 0,
-    initialClues,
-    hintClues,
-    maxHints: hintClues.length,
-    score: 100,
-  };
+  throw new Error("このポケモンが使える条件付きの技を取得できませんでした。");
+}
+
+async function fetchBattleAbilityForPokemon(pokemon: PokemonQuizData): Promise<BattleAbility> {
+  for (const abilityName of shuffle(pokemon.abilityNamesApi)) {
+    try {
+      return await fetchBattleAbility(abilityName);
+    } catch {
+      // Try another ability this Pokemon can have.
+    }
+  }
+
+  throw new Error("このポケモンの特性データを取得できませんでした。");
 }
 
 function createTrainerKnowledgeRound({
@@ -367,7 +348,7 @@ function createTrainerKnowledgeRound({
   correctAnswerValues,
   correctAnswerLabel,
   resultDetail,
-  showPokemonVisual = false,
+  showPokemonVisual = true,
 }: {
   pokemon: PokemonQuizData;
   trainerLevel: TrainerLevel;
@@ -412,18 +393,28 @@ function createTrainerKnowledgeRound({
 
 function trainerQuestionKinds(trainerLevel: TrainerLevel): TrainerQuestionKind[] {
   if (trainerLevel === "masara") {
-    return ["pokemon-guess", "type-matchup", "move-effectiveness"];
+    return ["type-matchup", "move-effectiveness"];
   }
 
   if (trainerLevel === "eliteFour") {
-    return ["pokemon-guess", "nature-stat", "move-effectiveness"];
+    return ["nature-stat", "move-effectiveness", "stat-comparison"];
   }
 
   if (trainerLevel === "champion") {
-    return ["pokemon-guess", "move-accuracy", "move-power", "stat-comparison", "move-priority"];
+    return [
+      "type-matchup",
+      "move-effectiveness",
+      "move-type",
+      "ability-description",
+      "nature-stat",
+      "move-accuracy",
+      "move-power",
+      "stat-comparison",
+      "move-priority",
+    ];
   }
 
-  return ["pokemon-guess", "move-type", "ability-description", "move-effectiveness"];
+  return ["move-type", "ability-description", "move-effectiveness"];
 }
 
 async function typeMatchCandidates(
@@ -449,7 +440,12 @@ async function createTypeMatchupRound(
   pokemon: PokemonQuizData,
   trainerLevel: TrainerLevel,
 ): Promise<QuizRound> {
-  const types = shuffle(await getCoreBattleTypes());
+  const coreTypes = await getCoreBattleTypes();
+  const types = shuffle(
+    pokemon.typeNamesApi
+      .map((typeName) => coreTypes.find((type) => type.apiName === typeName))
+      .filter((type): type is BattleType => Boolean(type)),
+  );
 
   for (const targetType of types) {
     for (const relation of shuffle<"super" | "none">(["super", "none"])) {
@@ -472,15 +468,17 @@ async function createTypeMatchupRound(
         answerFormat: "choice",
         prompt: {
           title: "タイプ相性",
-          body: `相手が「${targetType.nameJa}」タイプの場合、${relationText}になる攻撃タイプはどれ？`,
+          body: `${pokemon.displayNameJa}の「${targetType.nameJa}」タイプに対して、${relationText}になる攻撃タイプはどれ？`,
         },
         initialClues: [
+          clue("type-target-pokemon", "相手ポケモン", pokemon.displayNameJa),
           clue("type-target", "相手のタイプ", targetType.nameJa),
           clue("type-relation", "狙う効果", relationText),
         ],
         choices,
         correctAnswerValue: answer.apiName,
         correctAnswerLabel: `${answer.nameJa}（${relationText}）`,
+        showPokemonVisual: true,
       });
     }
   }
@@ -583,7 +581,7 @@ async function createMoveTypeRound(
   pokemon: PokemonQuizData,
   trainerLevel: TrainerLevel,
 ): Promise<QuizRound> {
-  const move = await fetchRandomBattleMove({ requirePower: true });
+  const move = await fetchBattleMoveKnownByPokemon(pokemon, { requirePower: true });
   const typeOptions = (await getCoreBattleTypes()).map((type) => quizChoice(type.apiName, type.nameJa));
 
   return createTrainerKnowledgeRound({
@@ -594,12 +592,16 @@ async function createMoveTypeRound(
     answerFormat: "select",
     prompt: {
       title: "技のタイプ",
-      body: `「${move.nameJa}」のタイプは？`,
+      body: `${pokemon.displayNameJa}が使える「${move.nameJa}」のタイプは？`,
     },
-    initialClues: [clue("move-name", "技", move.nameJa)],
+    initialClues: [
+      clue("move-pokemon", "関連ポケモン", pokemon.displayNameJa),
+      clue("move-name", "技", move.nameJa),
+    ],
     selectOptions: typeOptions,
     correctAnswerValue: move.typeApiName,
     correctAnswerLabel: `${move.nameJa}: ${move.typeJa}`,
+    showPokemonVisual: true,
   });
 }
 
@@ -607,7 +609,9 @@ async function createAbilityDescriptionRound(
   pokemon: PokemonQuizData,
   trainerLevel: TrainerLevel,
 ): Promise<QuizRound> {
-  const abilities: BattleAbility[] = [];
+  const answer = await fetchBattleAbilityForPokemon(pokemon);
+  const abilities: BattleAbility[] = [answer];
+
   for (let attempt = 0; attempt < 8 && abilities.length < 4; attempt += 1) {
     const ability = await fetchRandomBattleAbility(abilities.map((entry) => entry.apiName));
     if (!abilities.some((entry) => entry.descriptionJa === ability.descriptionJa)) {
@@ -619,8 +623,6 @@ async function createAbilityDescriptionRound(
     throw new Error("特性クイズの選択肢を作成できませんでした。");
   }
 
-  const answer = abilities[0];
-
   return createTrainerKnowledgeRound({
     pokemon,
     trainerLevel,
@@ -629,12 +631,16 @@ async function createAbilityDescriptionRound(
     answerFormat: "choice",
     prompt: {
       title: "特性クイズ",
-      body: `特性「${answer.nameJa}」の説明はどれ？`,
+      body: `${pokemon.displayNameJa}の特性「${answer.nameJa}」の説明はどれ？`,
     },
-    initialClues: [clue("ability-name", "特性", answer.nameJa)],
+    initialClues: [
+      clue("ability-pokemon", "関連ポケモン", pokemon.displayNameJa),
+      clue("ability-name", "特性", answer.nameJa),
+    ],
     choices: shuffle(abilities).map((ability) => quizChoice(ability.apiName, ability.descriptionJa)),
     correctAnswerValue: answer.apiName,
     correctAnswerLabel: `${answer.nameJa}: ${answer.descriptionJa}`,
+    showPokemonVisual: true,
   });
 }
 
@@ -653,9 +659,12 @@ async function createNatureStatRound(
     answerFormat: "dual-select",
     prompt: {
       title: "性格補正",
-      body: `性格「${nature.nameJa}」で上がる能力・下がる能力は？`,
+      body: `${pokemon.displayNameJa}を育てる時、性格「${nature.nameJa}」で上がる能力・下がる能力は？`,
     },
-    initialClues: [clue("nature-name", "性格", nature.nameJa)],
+    initialClues: [
+      clue("nature-pokemon", "育成対象", pokemon.displayNameJa),
+      clue("nature-name", "性格", nature.nameJa),
+    ],
     dualSelect: {
       firstLabel: "上がる能力",
       secondLabel: "下がる能力",
@@ -667,6 +676,7 @@ async function createNatureStatRound(
       second: nature.decreasedStat ?? "",
     },
     correctAnswerLabel: `${nature.nameJa}: ${nature.increasedStatJa}↑ / ${nature.decreasedStatJa}↓`,
+    showPokemonVisual: true,
   });
 }
 
@@ -682,7 +692,7 @@ async function createMoveNumberRound(
   trainerLevel: TrainerLevel,
   kind: "move-accuracy" | "move-power",
 ): Promise<QuizRound> {
-  const move = await fetchRandomBattleMove({
+  const move = await fetchBattleMoveKnownByPokemon(pokemon, {
     requireAccuracy: kind === "move-accuracy",
     requirePower: kind === "move-power",
   });
@@ -695,7 +705,10 @@ async function createMoveNumberRound(
   const powerValues = [20, 40, 50, 60, 70, 75, 80, 90, 95, 100, 110, 120, 150];
   const suffix = kind === "move-accuracy" ? "%" : "";
   const title = kind === "move-accuracy" ? "技命中率" : "技威力";
-  const body = kind === "move-accuracy" ? `「${move.nameJa}」の命中率は？` : `「${move.nameJa}」の威力は？`;
+  const body =
+    kind === "move-accuracy"
+      ? `${pokemon.displayNameJa}が使える「${move.nameJa}」の命中率は？`
+      : `${pokemon.displayNameJa}が使える「${move.nameJa}」の威力は？`;
 
   return createTrainerKnowledgeRound({
     pokemon,
@@ -704,10 +717,14 @@ async function createMoveNumberRound(
     answer: `${value}${suffix}`,
     answerFormat: "choice",
     prompt: { title, body },
-    initialClues: [clue("move-name", "技", move.nameJa)],
+    initialClues: [
+      clue("move-pokemon", "関連ポケモン", pokemon.displayNameJa),
+      clue("move-name", "技", move.nameJa),
+    ],
     choices: numericChoices(value, kind === "move-accuracy" ? accuracyValues : powerValues, suffix),
     correctAnswerValue: String(value),
     correctAnswerLabel: `${move.nameJa}: ${value}${suffix}`,
+    showPokemonVisual: true,
   });
 }
 
@@ -791,47 +808,48 @@ async function createMovePriorityRound(
     "roar",
     "trick-room",
   ];
+  const anchor = await fetchBattleMoveKnownByPokemon(pokemon, { candidateNames: priorityMoveNames });
   const moves = await fetchBattleMovesByNames(priorityMoveNames);
 
-  for (const anchor of shuffle(moves)) {
-    for (const direction of shuffle<"higher" | "lower">(["higher", "lower"])) {
-      const correctMoves = moves.filter((move) =>
-        direction === "higher" ? move.priority > anchor.priority : move.priority < anchor.priority,
-      );
-      const wrongMoves = moves.filter((move) =>
-        move.apiName !== anchor.apiName &&
-        (direction === "higher" ? move.priority <= anchor.priority : move.priority >= anchor.priority),
-      );
+  for (const direction of shuffle<"higher" | "lower">(["higher", "lower"])) {
+    const correctMoves = moves.filter((move) =>
+      direction === "higher" ? move.priority > anchor.priority : move.priority < anchor.priority,
+    );
+    const wrongMoves = moves.filter((move) =>
+      move.apiName !== anchor.apiName &&
+      (direction === "higher" ? move.priority <= anchor.priority : move.priority >= anchor.priority),
+    );
 
-      if (correctMoves.length < 1 || wrongMoves.length < 3) {
-        continue;
-      }
-
-      const answer = shuffle(correctMoves)[0];
-      const choices = shuffle([answer, ...shuffle(wrongMoves).slice(0, 3)]).map((move) =>
-        quizChoice(move.apiName, move.nameJa),
-      );
-      const relationText = direction === "higher" ? "高い" : "低い";
-
-      return createTrainerKnowledgeRound({
-        pokemon,
-        trainerLevel,
-        trainerQuestionKind: "move-priority",
-        answer: answer.nameJa,
-        answerFormat: "choice",
-        prompt: {
-          title: "技の優先度",
-          body: `「${anchor.nameJa}」より優先度が${relationText}技はどれ？`,
-        },
-        initialClues: [
-          clue("anchor-move", "基準の技", anchor.nameJa),
-          clue("anchor-priority", "基準の優先度", String(anchor.priority)),
-        ],
-        choices,
-        correctAnswerValue: answer.apiName,
-        correctAnswerLabel: `${answer.nameJa}（優先度 ${answer.priority}）`,
-      });
+    if (correctMoves.length < 1 || wrongMoves.length < 3) {
+      continue;
     }
+
+    const answer = shuffle(correctMoves)[0];
+    const choices = shuffle([answer, ...shuffle(wrongMoves).slice(0, 3)]).map((move) =>
+      quizChoice(move.apiName, move.nameJa),
+    );
+    const relationText = direction === "higher" ? "高い" : "低い";
+
+    return createTrainerKnowledgeRound({
+      pokemon,
+      trainerLevel,
+      trainerQuestionKind: "move-priority",
+      answer: answer.nameJa,
+      answerFormat: "choice",
+      prompt: {
+        title: "技の優先度",
+        body: `${pokemon.displayNameJa}が使える「${anchor.nameJa}」より優先度が${relationText}技はどれ？`,
+      },
+      initialClues: [
+        clue("priority-pokemon", "関連ポケモン", pokemon.displayNameJa),
+        clue("anchor-move", "基準の技", anchor.nameJa),
+        clue("anchor-priority", "基準の優先度", String(anchor.priority)),
+      ],
+      choices,
+      correctAnswerValue: answer.apiName,
+      correctAnswerLabel: `${answer.nameJa}（優先度 ${answer.priority}）`,
+      showPokemonVisual: true,
+    });
   }
 
   throw new Error("技の優先度クイズを作成できませんでした。");
@@ -844,8 +862,6 @@ async function createTrainerRoundByKind(
   candidateSpeciesIds: number[],
 ): Promise<QuizRound> {
   switch (kind) {
-    case "pokemon-guess":
-      return createTrainerPokemonGuessRound(pokemon, trainerLevel);
     case "type-matchup":
       return createTypeMatchupRound(pokemon, trainerLevel);
     case "move-effectiveness":
@@ -884,7 +900,103 @@ export async function createTrainerQuizRound(
     }
   }
 
-  return createTrainerPokemonGuessRound(pokemon, trainerLevel);
+  throw new Error("トレーナークイズを作成できませんでした。");
+}
+
+async function fetchSilhouetteChoicePokemon(
+  pokemon: PokemonQuizData,
+  candidateSpeciesIds: number[],
+): Promise<PokemonQuizData[]> {
+  const choices = [pokemon];
+  const sampledIds = [pokemon.id];
+
+  for (let attempt = 0; attempt < 36 && choices.length < 4; attempt += 1) {
+    const candidate = await fetchRandomPokemonQuizData(sampledIds, {
+      candidateSpeciesIds,
+      includeProfessorData: false,
+      includeBattleData: false,
+    });
+    sampledIds.push(candidate.id);
+
+    if (!choices.some((entry) => entry.id === candidate.id)) {
+      choices.push(candidate);
+    }
+  }
+
+  if (choices.length < 4) {
+    throw new Error("シルエット問題の選択肢を作成できませんでした。");
+  }
+
+  return shuffle(choices);
+}
+
+export async function createSilhouetteQuizRound(
+  pokemon: PokemonQuizData,
+  silhouetteLevel: SilhouetteLevel,
+  candidateSpeciesIds: number[],
+): Promise<QuizRound> {
+  const choicePokemon = await fetchSilhouetteChoicePokemon(pokemon, candidateSpeciesIds);
+
+  if (silhouetteLevel === "kageSearcher") {
+    const choices = choicePokemon.map((entry, index) =>
+      quizChoice(
+        String(entry.id),
+        `候補 ${index + 1}`,
+        undefined,
+        entry.artworkUrl || entry.spriteUrl,
+        `${entry.displayNameJa}のシルエット`,
+        "black",
+      ),
+    );
+
+    return {
+      answer: pokemon.displayNameJa,
+      difficulty: "silhouette",
+      silhouetteLevel,
+      answerFormat: "choice",
+      prompt: {
+        title: silhouetteLevelLabels[silhouetteLevel],
+        body: `「${pokemon.displayNameJa}」のシルエットはどれ？`,
+      },
+      choices,
+      correctAnswerValue: String(pokemon.id),
+      correctAnswerLabel: pokemon.displayNameJa,
+      resultDetail: `${pokemon.displayNameJa}の姿を見抜きました。`,
+      showPokemonVisual: false,
+      hidePokemonVisual: true,
+      pokemon,
+      revealedHints: 0,
+      wrongAttempts: 0,
+      initialClues: [clue("silhouette-name", "なまえ", pokemon.displayNameJa, "name")],
+      hintClues: [],
+      maxHints: 0,
+      score: 100,
+    };
+  }
+
+  return {
+    answer: pokemon.displayNameJa,
+    difficulty: "silhouette",
+    silhouetteLevel,
+    answerFormat: "choice",
+    prompt: {
+      title: silhouetteLevelLabels[silhouetteLevel],
+      body: "黒シルエットのポケモンはどれ？",
+    },
+    choices: choicePokemon.map((entry) => quizChoice(String(entry.id), entry.displayNameJa)),
+    correctAnswerValue: String(pokemon.id),
+    correctAnswerLabel: pokemon.displayNameJa,
+    resultDetail: `${pokemon.displayNameJa}のシルエットでした。`,
+    showPokemonVisual: true,
+    forceBlackSilhouette: true,
+    pokemon,
+    revealedHints: 0,
+    wrongAttempts: 0,
+    initialClues: [clue("silhouette-black", "すがた", "黒シルエットが表示されています", "image")],
+    hintClues: [],
+    maxHints: 0,
+    score: 100,
+  };
 }
 
 export function createQuizRound(
@@ -900,7 +1012,9 @@ export function createQuizRound(
     case "professor":
       return createProfessorRound(pokemon, professorLevel);
     case "trainer":
-      return createTrainerRound(pokemon);
+      throw new Error("トレーナーモードはバトルクイズ生成を使用してください。");
+    case "silhouette":
+      throw new Error("シルエットタイムアタックは専用の生成処理を使用してください。");
   }
 }
 
@@ -923,10 +1037,15 @@ export function registerWrongAnswer(round: QuizRound): QuizRound {
 }
 
 export function visibleClues(round: QuizRound): QuizClue[] {
-  return [...round.initialClues, ...round.hintClues.slice(0, round.revealedHints)];
+  const hintGroups = round.hintClueGroups ?? round.hintClues.map((hint) => [hint]);
+  return [...round.initialClues, ...hintGroups.slice(0, round.revealedHints).flat()];
 }
 
 export function shouldShowPokemonImage(round: QuizRound): boolean {
+  if (round.hidePokemonVisual) {
+    return false;
+  }
+
   if (round.showPokemonVisual !== undefined) {
     return round.showPokemonVisual;
   }
@@ -939,6 +1058,10 @@ export function shouldShowPokemonImage(round: QuizRound): boolean {
 }
 
 export function shouldUseBlackSilhouette(round: QuizRound): boolean {
+  if (round.forceBlackSilhouette) {
+    return true;
+  }
+
   if (round.showPokemonVisual !== undefined) {
     return false;
   }

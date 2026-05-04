@@ -19,7 +19,7 @@ import {
 import { type FormEvent, type ReactElement, type ReactNode, useEffect, useMemo, useState } from "react";
 import { fetchRandomPokemonQuizData } from "./lib/pokeapi";
 import {
-  TOTAL_QUESTIONS,
+  createSilhouetteQuizRound,
   createTrainerQuizRound,
   createQuizRound,
   difficultyDescriptions,
@@ -35,6 +35,10 @@ import {
   revealNextHint,
   shouldShowPokemonImage,
   shouldUseBlackSilhouette,
+  silhouetteLevelDescriptions,
+  silhouetteLevelLabels,
+  silhouetteLevelOrder,
+  totalQuestionsForMode,
   trainerLevelDescriptions,
   trainerLevelLabels,
   trainerLevelOrder,
@@ -49,6 +53,7 @@ import type {
   QuizRound,
   RankingEntry,
   RankingKey,
+  SilhouetteLevel,
   TrainerLevel,
 } from "./lib/types";
 
@@ -72,6 +77,7 @@ const difficultyIcons: Record<Difficulty, IconComponent> = {
   adult: Medal,
   professor: Brain,
   trainer: Lightning,
+  silhouette: Eye,
 };
 
 const difficultyAccents: Record<Difficulty, string> = {
@@ -79,9 +85,10 @@ const difficultyAccents: Record<Difficulty, string> = {
   adult: "border-[#5aa89c] bg-[#effaf6]",
   professor: "border-[#6f88c7] bg-[#f3f6ff]",
   trainer: "border-[#d0a331] bg-[#fff9e6]",
+  silhouette: "border-[#7f8f7c] bg-[#f5f8f1]",
 };
 
-const difficultyOrder: Difficulty[] = ["kids", "adult", "professor", "trainer"];
+const difficultyOrder: Difficulty[] = ["kids", "adult", "professor", "trainer", "silhouette"];
 
 const generationOptions: GenerationOption[] = [
   { id: 1, label: "第1世代", games: "赤・緑、青、ピカチュウ", start: 1, end: 151 },
@@ -117,6 +124,11 @@ const modePokemonPools: Record<Difficulty, HomeModePokemon[]> = {
     { id: 149, name: "カイリュー", type: "ドラゴン / ひこう", note: "バトル知識向き" },
     { id: 445, name: "ガブリアス", type: "ドラゴン / じめん", note: "相性推理が楽しい" },
     { id: 6, name: "リザードン", type: "ほのお / ひこう", note: "弱点と耐性が鍵" },
+  ],
+  silhouette: [
+    { id: 132, name: "メタモン", type: "ノーマル", note: "影を見分ける瞬発力" },
+    { id: 778, name: "ミミッキュ", type: "ゴースト / フェアリー", note: "輪郭観察が勝負" },
+    { id: 359, name: "アブソル", type: "あく", note: "一瞬で形を読む" },
   ],
 };
 
@@ -168,6 +180,7 @@ function formatModeName(
   difficulty: Difficulty,
   professorLevel?: ProfessorLevel | null,
   trainerLevel?: TrainerLevel | null,
+  silhouetteLevel?: SilhouetteLevel | null,
 ): string {
   if (difficulty === "professor" && professorLevel) {
     return `博士モード（${professorLevelLabels[professorLevel]}）`;
@@ -177,6 +190,10 @@ function formatModeName(
     return `トレーナーモード（${trainerLevelLabels[trainerLevel]}）`;
   }
 
+  if (difficulty === "silhouette" && silhouetteLevel) {
+    return `シルエットタイムアタック（${silhouetteLevelLabels[silhouetteLevel]}）`;
+  }
+
   return `${difficultyLabels[difficulty]}モード`;
 }
 
@@ -184,6 +201,7 @@ function formatRankingName(
   difficulty: Difficulty | null,
   professorLevel: ProfessorLevel | null,
   trainerLevel: TrainerLevel | null,
+  silhouetteLevel: SilhouetteLevel | null,
 ): string | null {
   if (!difficulty) {
     return null;
@@ -195,6 +213,10 @@ function formatRankingName(
 
   if (difficulty === "trainer") {
     return trainerLevel ? `トレーナー（${trainerLevelLabels[trainerLevel]}）` : null;
+  }
+
+  if (difficulty === "silhouette") {
+    return silhouetteLevel ? `シルエットTA（${silhouetteLevelLabels[silhouetteLevel]}）` : null;
   }
 
   return difficultyLabels[difficulty];
@@ -284,17 +306,21 @@ function DifficultySelector({
   selected,
   selectedProfessorLevel,
   selectedTrainerLevel,
+  selectedSilhouetteLevel,
   onSelect,
   onSelectProfessorLevel,
   onSelectTrainerLevel,
+  onSelectSilhouetteLevel,
   modePokemon,
 }: {
   selected: Difficulty | null;
   selectedProfessorLevel: ProfessorLevel | null;
   selectedTrainerLevel: TrainerLevel | null;
+  selectedSilhouetteLevel: SilhouetteLevel | null;
   onSelect: (difficulty: Difficulty) => void;
   onSelectProfessorLevel: (level: ProfessorLevel) => void;
   onSelectTrainerLevel: (level: TrainerLevel) => void;
+  onSelectSilhouetteLevel: (level: SilhouetteLevel) => void;
   modePokemon: Record<Difficulty, HomeModePokemon>;
 }): ReactElement {
   return (
@@ -388,6 +414,28 @@ function DifficultySelector({
                       <span>トレーナーモード</span>
                       <strong>{trainerLevelLabels[level]}</strong>
                       <small>{trainerLevelDescriptions[level]}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {difficulty === "silhouette" && active && (
+              <div className="professor-level-panel" aria-label="シルエットタイムアタックのレベル">
+                {silhouetteLevelOrder.map((level) => {
+                  const levelActive = selectedSilhouetteLevel === level;
+
+                  return (
+                    <button
+                      aria-pressed={levelActive}
+                      className={cx("professor-level-option", levelActive && "is-active")}
+                      key={level}
+                      onClick={() => onSelectSilhouetteLevel(level)}
+                      type="button"
+                    >
+                      <span>シルエットTA</span>
+                      <strong>{silhouetteLevelLabels[level]}</strong>
+                      <small>{silhouetteLevelDescriptions[level]}</small>
                     </button>
                   );
                 })}
@@ -507,14 +555,54 @@ function RankingPanel({
 }
 
 function UpdateNotes(): ReactElement {
+  const updates = [
+    {
+      date: "2026-05-04",
+      label: "2026.05.04：",
+      items: [
+        "博士モードのヒント順をレベル別に調整し、進化の順番を追加。",
+        "トレーナーモードをバトル知識クイズ専用に変更。",
+        "シルエットタイムアタックを追加。",
+      ],
+    },
+  ];
+
   return (
     <section className="update-notes" aria-label="バージョンアップデート">
-      <p>
-        <time dateTime="2026-05-04">2026.05.04</time>
-        <span>
-          博士モードに「見習い中・修行中・博士検定」を追加。いきなり博士検定に投げ込まれる事故を減らしました。白衣はレンタルからで大丈夫です。
-        </span>
-      </p>
+      <h2>アップデート情報</h2>
+      <div className="update-note-list">
+        {updates.map((group) => (
+          <div className="update-note-group" key={group.date}>
+            <time dateTime={group.date}>{group.label}</time>
+            <ul>
+              {group.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FutureIdeas(): ReactElement {
+  const ideas = [
+    "苦手問題の復習ノート",
+    "タイプ相性ビンゴ",
+    "進化チェーン当て",
+    "チーム補完クイズ",
+    "連勝ボーナス付きサバイバル",
+  ];
+
+  return (
+    <section className="future-ideas" aria-label="追加コンテンツ案">
+      <h2>追加コンテンツ案</h2>
+      <ul>
+        {ideas.map((idea) => (
+          <li key={idea}>{idea}</li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -572,6 +660,10 @@ function PokemonVisual({
   round: QuizRound | null;
   revealColorImage?: boolean;
 }): ReactElement {
+  if (round?.hidePokemonVisual && !revealColorImage) {
+    return <div className="hidden" />;
+  }
+
   const canShow = revealColorImage || (round ? shouldShowPokemonImage(round) : false);
   const isBlack = revealColorImage ? false : round ? shouldUseBlackSilhouette(round) : false;
   const src = round?.pokemon.artworkUrl || round?.pokemon.spriteUrl || "";
@@ -627,10 +719,18 @@ function ChoiceButton({
 }): ReactElement {
   return (
     <button
-      className="choice-answer-button"
+      className={cx("choice-answer-button", choice.imageUrl && "choice-answer-button-visual")}
       onClick={() => onSelect(choice.value)}
       type="button"
     >
+      {choice.imageUrl && (
+        <img
+          alt={choice.imageAlt ?? choice.label}
+          className={cx("choice-answer-art", choice.imageTone === "black" && "is-black")}
+          draggable={false}
+          src={choice.imageUrl}
+        />
+      )}
       <strong>{choice.label}</strong>
       {choice.description && <span>{choice.description}</span>}
     </button>
@@ -667,12 +767,40 @@ function AnswerForm({
   onSkip: () => void;
 }): ReactElement {
   if (round.answerFormat === "choice") {
+    const useMobileChoiceSelect = round.difficulty === "trainer";
+    const hasImageChoices = (round.choices ?? []).some((choice) => Boolean(choice.imageUrl));
+
     return (
       <Panel className="answer-dock p-5">
         <div className="space-y-4">
           <div>
             <p className="block text-sm font-black text-stone-950">選択肢</p>
-            <div className="choice-answer-grid mt-2">
+            {useMobileChoiceSelect && (
+              <form className="mobile-choice-select md:hidden" onSubmit={onStructuredSubmit}>
+                <select
+                  className="quiz-select"
+                  onChange={(event) => onSelectedAnswerChange(event.target.value)}
+                  value={selectedAnswer}
+                >
+                  <option value="">選択してください</option>
+                  {(round.choices ?? []).map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+                <IconButton className="max-md:w-full" icon={CheckCircle} type="submit">
+                  回答
+                </IconButton>
+              </form>
+            )}
+            <div
+              className={cx(
+                "choice-answer-grid mt-2",
+                useMobileChoiceSelect && "max-md:hidden",
+                hasImageChoices && "choice-answer-grid-visual",
+              )}
+            >
               {(round.choices ?? []).map((choice) => (
                 <ChoiceButton choice={choice} key={choice.value} onSelect={onChoiceAnswer} />
               ))}
@@ -941,6 +1069,7 @@ export default function App(): ReactElement {
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null);
   const [professorLevel, setProfessorLevel] = useState<ProfessorLevel | null>(null);
   const [trainerLevel, setTrainerLevel] = useState<TrainerLevel | null>(null);
+  const [silhouetteLevel, setSilhouetteLevel] = useState<SilhouetteLevel | null>(null);
   const [status, setStatus] = useState<GameStatus>("idle");
   const [round, setRound] = useState<QuizRound | null>(null);
   const [questionNumber, setQuestionNumber] = useState(0);
@@ -971,22 +1100,36 @@ export default function App(): ReactElement {
   const hasSelectedModeLevel = Boolean(
     difficulty &&
       (difficulty !== "professor" || professorLevel) &&
-      (difficulty !== "trainer" || trainerLevel),
+      (difficulty !== "trainer" || trainerLevel) &&
+      (difficulty !== "silhouette" || silhouetteLevel),
   );
   const selectedRankingKey: RankingKey | null =
-    difficulty && (difficulty !== "professor" || professorLevel) && (difficulty !== "trainer" || trainerLevel)
-      ? getRankingKey(difficulty, professorLevel ?? undefined, trainerLevel ?? undefined)
+    difficulty &&
+    (difficulty !== "professor" || professorLevel) &&
+    (difficulty !== "trainer" || trainerLevel) &&
+    (difficulty !== "silhouette" || silhouetteLevel)
+      ? getRankingKey(
+          difficulty,
+          professorLevel ?? undefined,
+          trainerLevel ?? undefined,
+          silhouetteLevel ?? undefined,
+        )
       : null;
   const activeRanking = selectedRankingKey ? rankings[selectedRankingKey] ?? [] : [];
-  const activeRankingLabel = formatRankingName(difficulty, professorLevel, trainerLevel);
+  const activeRankingLabel = formatRankingName(difficulty, professorLevel, trainerLevel, silhouetteLevel);
   const rankingEmptyText =
     difficulty === "professor" && !professorLevel
       ? "博士モードのレベルを選ぶとランキングを表示します。"
       : difficulty === "trainer" && !trainerLevel
         ? "トレーナーモードのレベルを選ぶとランキングを表示します。"
+        : difficulty === "silhouette" && !silhouetteLevel
+          ? "シルエットタイムアタックのレベルを選ぶとランキングを表示します。"
       : undefined;
   const activeModeName =
-    difficulty && hasSelectedModeLevel ? formatModeName(difficulty, professorLevel, trainerLevel) : null;
+    difficulty && hasSelectedModeLevel ? formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel) : null;
+  const totalQuestions = difficulty
+    ? totalQuestionsForMode(difficulty, professorLevel, trainerLevel, silhouetteLevel)
+    : 0;
   const startDisabledReason = !hasSelectedModeLevel
     ? "モードとレベルを選択してください"
     : candidateSpeciesIds.length === 0
@@ -1012,7 +1155,8 @@ export default function App(): ReactElement {
       !difficulty ||
       candidateSpeciesIds.length === 0 ||
       (difficulty === "professor" && !professorLevel) ||
-      (difficulty === "trainer" && !trainerLevel)
+      (difficulty === "trainer" && !trainerLevel) ||
+      (difficulty === "silhouette" && !silhouetteLevel)
     ) {
       return;
     }
@@ -1034,6 +1178,8 @@ export default function App(): ReactElement {
       const nextRound =
         difficulty === "trainer"
           ? await createTrainerQuizRound(pokemon, trainerLevel ?? "gymLeader", candidateSpeciesIds)
+          : difficulty === "silhouette"
+            ? await createSilhouetteQuizRound(pokemon, silhouetteLevel ?? "kageSearcher", candidateSpeciesIds)
           : createQuizRound(pokemon, difficulty, professorLevel ?? undefined);
       setRound(nextRound);
       setUsedIds([...excludedIds, pokemon.id]);
@@ -1086,6 +1232,10 @@ export default function App(): ReactElement {
     if (nextDifficulty !== "trainer") {
       setTrainerLevel(null);
     }
+
+    if (nextDifficulty !== "silhouette") {
+      setSilhouetteLevel(null);
+    }
   }
 
   function handleProfessorLevelSelect(nextProfessorLevel: ProfessorLevel) {
@@ -1095,6 +1245,11 @@ export default function App(): ReactElement {
 
   function handleTrainerLevelSelect(nextTrainerLevel: TrainerLevel) {
     setTrainerLevel(nextTrainerLevel);
+    setStartTooltipVisible(false);
+  }
+
+  function handleSilhouetteLevelSelect(nextSilhouetteLevel: SilhouetteLevel) {
+    setSilhouetteLevel(nextSilhouetteLevel);
     setStartTooltipVisible(false);
   }
 
@@ -1117,6 +1272,7 @@ export default function App(): ReactElement {
     setDifficulty(null);
     setProfessorLevel(null);
     setTrainerLevel(null);
+    setSilhouetteLevel(null);
     setModePokemon(pickModePokemon());
     setStartTooltipVisible(false);
   }
@@ -1205,6 +1361,11 @@ export default function App(): ReactElement {
       return;
     }
 
+    if (round.answerFormat === "choice" && !selectedAnswer) {
+      setNotice({ tone: "error", text: "答えを選択してください。" });
+      return;
+    }
+
     if (round.answerFormat === "dual-select" && (!dualAnswer.first || !dualAnswer.second)) {
       setNotice({ tone: "error", text: "上がる能力と下がる能力を選択してください。" });
       return;
@@ -1213,6 +1374,8 @@ export default function App(): ReactElement {
     const correct =
       round.answerFormat === "dual-select"
         ? isCorrectStructuredAnswer(round, dualAnswer.first, dualAnswer.second)
+        : round.answerFormat === "choice"
+          ? isCorrectStructuredAnswer(round, selectedAnswer)
         : isCorrectStructuredAnswer(round, selectedAnswer);
 
     finishRound(
@@ -1241,7 +1404,7 @@ export default function App(): ReactElement {
   }
 
   function goNext() {
-    if (questionNumber >= TOTAL_QUESTIONS) {
+    if (questionNumber >= totalQuestions) {
       setFinishedAt(Date.now());
       setRound(null);
       setStatus("finished");
@@ -1262,7 +1425,8 @@ export default function App(): ReactElement {
       status !== "finished" ||
       !difficulty ||
       (difficulty === "professor" && !professorLevel) ||
-      (difficulty === "trainer" && !trainerLevel)
+      (difficulty === "trainer" && !trainerLevel) ||
+      (difficulty === "silhouette" && !silhouetteLevel)
     ) {
       return;
     }
@@ -1271,6 +1435,7 @@ export default function App(): ReactElement {
       difficulty,
       professorLevel: difficulty === "professor" ? professorLevel ?? undefined : undefined,
       trainerLevel: difficulty === "trainer" ? trainerLevel ?? undefined : undefined,
+      silhouetteLevel: difficulty === "silhouette" ? silhouetteLevel ?? undefined : undefined,
       playerName: playerName.trim() || "プレイヤー",
       score: totalScore,
       hintsUsed: totalHints,
@@ -1311,6 +1476,7 @@ export default function App(): ReactElement {
                     difficulty,
                     round.professorLevel ?? professorLevel,
                     round.trainerLevel ?? trainerLevel,
+                    round.silhouetteLevel ?? silhouetteLevel,
                   )}
                 </h2>
               </div>
@@ -1323,7 +1489,7 @@ export default function App(): ReactElement {
             <div className={cx("grid grid-cols-3 gap-2 text-sm md:min-w-[22rem]", isQuizActive && "quiz-mobile-stats")}>
               <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
                 <p className="text-xs font-bold text-stone-500">問題</p>
-                <p className="font-mono text-xl font-black">{questionNumber || 0}/8</p>
+                <p className="font-mono text-xl font-black">{questionNumber || 0}/{totalQuestions || 0}</p>
               </div>
               <div className="rounded-2xl border border-stone-300 bg-white px-4 py-3">
                 <p className="text-xs font-bold text-stone-500">得点</p>
@@ -1362,15 +1528,18 @@ export default function App(): ReactElement {
                   modePokemon={modePokemon}
                   selected={difficulty}
                   selectedProfessorLevel={professorLevel}
+                  selectedSilhouetteLevel={silhouetteLevel}
                   selectedTrainerLevel={trainerLevel}
                   onSelect={handleDifficultySelect}
                   onSelectProfessorLevel={handleProfessorLevelSelect}
+                  onSelectSilhouetteLevel={handleSilhouetteLevelSelect}
                   onSelectTrainerLevel={handleTrainerLevelSelect}
                 />
               </Panel>
               <RankingPanel emptyText={rankingEmptyText} entries={activeRanking} modeLabel={activeRankingLabel} />
             </div>
             <UpdateNotes />
+            <FutureIdeas />
           </>
         )}
 
@@ -1416,6 +1585,7 @@ export default function App(): ReactElement {
                         difficulty,
                         round.professorLevel ?? professorLevel,
                         round.trainerLevel ?? trainerLevel,
+                        round.silhouetteLevel ?? silhouetteLevel,
                       )}
                     </h2>
                   </div>
@@ -1458,8 +1628,8 @@ export default function App(): ReactElement {
             <div className="quiz-visual-column space-y-4">
               {status === "answered" && lastAnswer && (
                 <RoundResultBanner
-                  actionIcon={questionNumber >= TOTAL_QUESTIONS ? Trophy : Play}
-                  actionLabel={questionNumber >= TOTAL_QUESTIONS ? "結果を見る" : "次の問題"}
+                  actionIcon={questionNumber >= totalQuestions ? Trophy : Play}
+                  actionLabel={questionNumber >= totalQuestions ? "結果を見る" : "次の問題"}
                   onAction={goNext}
                   result={lastAnswer}
                 />
@@ -1498,10 +1668,10 @@ export default function App(): ReactElement {
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a563c]">RESULT</p>
                   <h2 className="mt-3 text-4xl font-black leading-none tracking-tight text-stone-950 md:text-6xl">
-                    {totalScore} / 800
+                    {totalScore} / {totalQuestions * 100}
                   </h2>
                   <p className="mt-4 text-sm font-bold leading-6 text-stone-600">
-                    {formatModeName(difficulty, professorLevel, trainerLevel)}を完走しました。ヒント {totalHints} 回、
+                    {formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel)}を完走しました。ヒント {totalHints} 回、
                     タイム {formatElapsed(elapsedMs)}。
                   </p>
                 </div>
