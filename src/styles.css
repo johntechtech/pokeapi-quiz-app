@@ -116,12 +116,14 @@ input:disabled {
 }
 
 .generation-selector {
+  min-width: 0;
   margin-bottom: 1.25rem;
 }
 
 .generation-accordion-button {
   display: flex;
   width: 100%;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
@@ -210,6 +212,8 @@ input:disabled {
 }
 
 .pokemon-filter-options {
+  max-width: 100%;
+  min-width: 0;
   margin-top: 0.75rem;
   border: 1px solid #e7e5e4;
   border-radius: 1.15rem;
@@ -219,6 +223,7 @@ input:disabled {
 
 .filter-tab-list {
   display: grid;
+  min-width: 0;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.35rem;
   border: 1px solid #e7e5e4;
@@ -296,6 +301,8 @@ input:disabled {
 }
 
 .filter-tab-panel {
+  max-width: 100%;
+  min-width: 0;
   margin-top: 0.75rem;
   min-height: 10.35rem;
 }
@@ -937,19 +944,20 @@ button:hover .mode-pokemon img {
     justify-content: flex-start;
   }
 
-  .generation-options {
-    grid-template-columns: 1fr;
-  }
-
   .pokemon-filter-options {
+    overflow: hidden;
     padding: 0.55rem;
   }
 
   .filter-tab-list {
     display: flex;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     padding: 0.3rem;
+    scroll-padding-inline: 0.3rem;
+    scroll-snap-type: x proximity;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   .filter-tab-list::-webkit-scrollbar {
@@ -959,10 +967,53 @@ button:hover .mode-pokemon img {
   .filter-tab-button {
     flex: 0 0 auto;
     min-width: 5.1rem;
+    scroll-snap-align: start;
   }
 
   .filter-tab-panel {
     min-height: 13.5rem;
+  }
+
+  .generation-options,
+  .filter-toggle-grid,
+  .filter-chip-grid,
+  .filter-swatch-grid {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding: 0 0 0.35rem;
+    scroll-padding-inline: 0.1rem;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .generation-options,
+  .filter-toggle-grid,
+  .filter-swatch-grid {
+    flex-wrap: nowrap;
+  }
+
+  .filter-chip-grid {
+    flex-wrap: nowrap;
+  }
+
+  .generation-option,
+  .filter-toggle-option {
+    flex: 0 0 min(16.75rem, 78vw);
+    scroll-snap-align: start;
+  }
+
+  .filter-chip {
+    flex: 0 0 auto;
+    min-width: 5.35rem;
+    scroll-snap-align: start;
+  }
+
+  .filter-swatch-button {
+    flex: 0 0 5.45rem;
+    scroll-snap-align: start;
   }
 
   .filter-group-heading {
@@ -972,19 +1023,6 @@ button:hover .mode-pokemon img {
   .filter-group-heading span {
     margin-top: 0.2rem;
     text-align: left;
-  }
-
-  .filter-toggle-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .filter-swatch-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .filter-chip {
-    flex: 1 1 calc(33.333% - 0.45rem);
-    min-width: 4.75rem;
   }
 
   .update-note-group {
