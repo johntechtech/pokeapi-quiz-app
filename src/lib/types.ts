@@ -139,6 +139,8 @@ export interface RankingEntry {
   professorLevel?: ProfessorLevel;
   trainerLevel?: TrainerLevel;
   silhouetteLevel?: SilhouetteLevel;
+  userId: string;
+  displayName: string;
   playerName: string;
   score: number;
   hintsUsed: number;

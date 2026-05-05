@@ -6,6 +6,7 @@ import {
   CheckCircle,
   House,
   Eye,
+  ShareNetwork,
   FloppyDisk,
   Lightning,
   Medal,
@@ -46,7 +47,15 @@ import {
   trainerLevelOrder,
   visibleClues,
 } from "./lib/quiz";
-import { getRankingKey, loadRankings, saveRankingEntry } from "./lib/ranking";
+import {
+  fetchRankings,
+  getAuthenticatedUser,
+  getRankingKey,
+  saveRankingEntry,
+  type RankingDraft,
+  type RankingScope,
+} from "./lib/ranking";
+import { buildShareText, createShareImage } from "./lib/share";
 import type {
   Difficulty,
   ProfessorLevel,
@@ -534,11 +543,17 @@ function RankingPanel({
   entries,
   emptyText,
   modeLabel,
+  scope,
+  onScopeChange,
 }: {
   entries: RankingEntry[];
   emptyText?: string;
   modeLabel: string | null;
+  scope: RankingScope;
+  onScopeChange: (scope: RankingScope) => void;
 }): ReactElement {
+  const isSilhouetteRanking = entries.some((entry) => entry.difficulty === "silhouette");
+
   return (
     <Panel className="p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -549,6 +564,10 @@ function RankingPanel({
           </h2>
         </div>
         <Trophy aria-hidden className="text-[#d0a331]" size={26} weight="bold" />
+      </div>
+      <div className="mb-4 inline-flex rounded-full border border-stone-300 bg-stone-100 p-1 text-xs font-bold">
+        <button className={cx("rounded-full px-3 py-1", scope === "global" && "bg-white text-stone-950")} onClick={() => onScopeChange("global")} type="button">全体</button>
+        <button className={cx("rounded-full px-3 py-1", scope === "friends" && "bg-white text-stone-950")} onClick={() => onScopeChange("friends")} type="button">友達</button>
       </div>
 
       {entries.length === 0 ? (
@@ -561,13 +580,15 @@ function RankingPanel({
             <li className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 py-3" key={`${entry.completedAt}-${index}`}>
               <span className="font-mono text-sm font-black text-stone-400">{index + 1}</span>
               <div className="min-w-0">
-                <p className="break-words text-sm font-bold text-stone-950">{entry.playerName}</p>
+                <p className="break-words text-sm font-bold text-stone-950">{entry.displayName}</p>
                 <p className="text-xs text-stone-500">
-                  {formatElapsed(entry.elapsedMs)} / 図鑑メモ {entry.hintsUsed}
+                  {isSilhouetteRanking ? `タイム ${formatElapsed(entry.elapsedMs)}` : `${formatElapsed(entry.elapsedMs)} / 図鑑メモ ${entry.hintsUsed}`}
                 </p>
               </div>
               <div className="text-right">
-                <p className="font-mono text-lg font-black text-stone-950">{entry.score}</p>
+                <p className="font-mono text-lg font-black text-stone-950">
+                  {entry.difficulty === "silhouette" ? formatStopwatch(entry.elapsedMs) : entry.score}
+                </p>
                 <p className="text-xs text-stone-400">{formatDate(entry.completedAt)}</p>
               </div>
             </li>
@@ -693,13 +714,13 @@ function PokemonVisual({
   const src = round?.pokemon.artworkUrl || round?.pokemon.spriteUrl || "";
 
   return (
-    <div className="relative grid min-h-[18rem] place-items-center overflow-hidden rounded-[2rem] border border-stone-200 bg-[#f7f2e9] p-8">
+    <div className="relative grid min-h-[18rem] place-items-center overflow-hidden rounded-[2rem] border border-stone-200 bg-[#f7f2e9] p-8 max-md:min-h-[12rem] max-md:p-4">
       <div className="absolute inset-x-8 bottom-8 h-px bg-stone-300/80" />
       {canShow && src ? (
         <img
           alt={isBlack ? "ポケモンのシルエット" : "ポケモンのカラーの姿"}
           className={cx(
-            "relative z-[1] max-h-[18rem] w-full max-w-[22rem] object-contain drop-shadow-[0_26px_24px_rgba(54,45,33,0.18)] transition duration-500",
+            "relative z-[1] max-h-[18rem] w-full max-w-[22rem] object-contain drop-shadow-[0_26px_24px_rgba(54,45,33,0.18)] transition duration-500 max-md:max-h-[10.5rem]",
             isBlack && "brightness-0 contrast-200 saturate-0 opacity-90",
           )}
           draggable={false}
@@ -1162,12 +1183,17 @@ export default function App(): ReactElement {
   const [stopwatchTick, setStopwatchTick] = useState(() => Date.now());
   const [playerName, setPlayerName] = useState("");
   const [saved, setSaved] = useState(false);
-  const [rankings, setRankings] = useState(loadRankings);
+  const [isSaving, setIsSaving] = useState(false);
+  const [activeRanking, setActiveRanking] = useState<RankingEntry[]>([]);
+  const [rankingScope, setRankingScope] = useState<RankingScope>("global");
+  const [viewerUserId, setViewerUserId] = useState<string | null>(null);
   const [lastAnswer, setLastAnswer] = useState<LastAnswer | null>(null);
   const [modePokemon, setModePokemon] = useState(pickModePokemon);
   const [selectedGenerationIds, setSelectedGenerationIds] = useState<GenerationId[]>(allGenerationIds);
   const [generationAccordionOpen, setGenerationAccordionOpen] = useState(false);
   const [startTooltipVisible, setStartTooltipVisible] = useState(false);
+  const [sharePreviewUrl, setSharePreviewUrl] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
 
   const currentClues = useMemo(() => (round ? visibleClues(round) : []), [round]);
   const candidateSpeciesIds = useMemo(
@@ -1194,7 +1220,6 @@ export default function App(): ReactElement {
           silhouetteLevel ?? undefined,
         )
       : null;
-  const activeRanking = selectedRankingKey ? rankings[selectedRankingKey] ?? [] : [];
   const activeRankingLabel = formatRankingName(difficulty, professorLevel, trainerLevel, silhouetteLevel);
   const rankingEmptyText =
     difficulty === "professor" && !professorLevel
@@ -1242,11 +1267,50 @@ export default function App(): ReactElement {
     return () => window.clearInterval(intervalId);
   }, [roundStartedAt, status]);
 
+  useEffect(() => {
+    void getAuthenticatedUser().then((user) => setViewerUserId(user.id));
+  }, []);
+
+  async function refreshRankings() {
+    if (!difficulty || !selectedRankingKey || !viewerUserId) {
+      setActiveRanking([]);
+      return;
+    }
+
+    try {
+      const entries = await fetchRankings({
+        difficulty,
+        professorLevel: professorLevel ?? undefined,
+        trainerLevel: trainerLevel ?? undefined,
+        silhouetteLevel: silhouetteLevel ?? undefined,
+        scope: rankingScope,
+        viewerUserId,
+      });
+      setActiveRanking(entries);
+    } catch {
+      setActiveRanking([]);
+    }
+  }
+
+  useEffect(() => {
+    void refreshRankings();
+  }, [difficulty, professorLevel, trainerLevel, silhouetteLevel, rankingScope, viewerUserId]);
+
   function settleActiveTimer(extraMs = 0) {
     const now = Date.now();
     setElapsedMs((current) => current + (roundStartedAt ? Math.max(0, now - roundStartedAt) : 0) + extraMs);
     setRoundStartedAt(null);
     setStopwatchTick(now);
+  }
+
+  function clearSharePreview() {
+    setSharePreviewUrl((current) => {
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+
+      return null;
+    });
   }
 
   async function prepareRound(nextQuestionNumber: number, excludedIds: number[]) {
@@ -1315,6 +1379,7 @@ export default function App(): ReactElement {
     setDualAnswer({ first: "", second: "" });
     setSaved(false);
     setPlayerName("");
+    clearSharePreview();
     void prepareRound(1, []);
   }
 
@@ -1330,6 +1395,7 @@ export default function App(): ReactElement {
   function handleDifficultySelect(nextDifficulty: Difficulty) {
     setDifficulty(nextDifficulty);
     setStartTooltipVisible(false);
+    clearSharePreview();
 
     if (nextDifficulty !== "professor") {
       setProfessorLevel(null);
@@ -1347,16 +1413,106 @@ export default function App(): ReactElement {
   function handleProfessorLevelSelect(nextProfessorLevel: ProfessorLevel) {
     setProfessorLevel(nextProfessorLevel);
     setStartTooltipVisible(false);
+    clearSharePreview();
   }
 
   function handleTrainerLevelSelect(nextTrainerLevel: TrainerLevel) {
     setTrainerLevel(nextTrainerLevel);
     setStartTooltipVisible(false);
+    clearSharePreview();
   }
 
   function handleSilhouetteLevelSelect(nextSilhouetteLevel: SilhouetteLevel) {
     setSilhouetteLevel(nextSilhouetteLevel);
     setStartTooltipVisible(false);
+    clearSharePreview();
+  }
+
+  useEffect(() => {
+    return () => {
+      if (sharePreviewUrl) {
+        URL.revokeObjectURL(sharePreviewUrl);
+      }
+    };
+  }, [sharePreviewUrl]);
+
+  async function prepareShareImage(): Promise<{ blob: Blob; text: string }> {
+    if (!difficulty) {
+      throw new Error("モード情報が見つかりません。");
+    }
+
+    const modeName = formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel);
+    const elapsedLabel = difficulty === "silhouette" ? formatStopwatch(liveElapsedMs) : formatElapsed(liveElapsedMs);
+    const scoreLabel = `${totalScore} / ${totalQuestions * 100}`;
+    const hintsLabel = `${totalHints} hints`;
+    const mascot = modePokemon[difficulty];
+
+    const blob = await createShareImage({
+      modeName,
+      difficulty,
+      elapsedLabel,
+      scoreLabel,
+      hintsLabel,
+      pokemonName: mascot.name,
+      pokemonImageUrl: officialArtworkUrl(mascot.id),
+    });
+
+    const nextUrl = URL.createObjectURL(blob);
+    setSharePreviewUrl((current) => {
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+      return nextUrl;
+    });
+
+    return { blob, text: buildShareText(difficulty, modeName, elapsedLabel, scoreLabel) };
+  }
+
+  async function handleShare() {
+    if (status !== "finished" || !difficulty || shareBusy) {
+      return;
+    }
+
+    setShareBusy(true);
+    try {
+      const { blob, text } = await prepareShareImage();
+      const file = new File([blob], "poke-quiz-result.png", { type: "image/png" });
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ text, files: [file], title: "ポケモンクイズ結果" });
+        setNotice({ tone: "success", text: "共有シートを開きました！" });
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "poke-quiz-result.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+
+      let copiedText = false;
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          copiedText = true;
+        } catch {
+          copiedText = false;
+        }
+      }
+
+      setNotice({
+        tone: "info",
+        text: copiedText
+          ? "画像をダウンロードし、シェア文面をクリップボードへコピーしました。"
+          : "画像をダウンロードしました。",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "共有に失敗しました。" });
+    } finally {
+      setShareBusy(false);
+    }
   }
 
   function returnHome() {
@@ -1382,6 +1538,7 @@ export default function App(): ReactElement {
     setSilhouetteLevel(null);
     setModePokemon(pickModePokemon());
     setStartTooltipVisible(false);
+    clearSharePreview();
   }
 
   function toggleGeneration(generationId: GenerationId) {
@@ -1463,9 +1620,7 @@ export default function App(): ReactElement {
     }
 
     const nextRound = registerWrongChoiceAnswer(round, value);
-    const scoreLoss = round.score - nextRound.score;
     const selectedChoice = round.choices?.find((choice) => choice.value === value);
-    const penaltyText = round.difficulty === "silhouette" ? " / +2秒" : "";
     if (round.difficulty === "silhouette") {
       setElapsedMs((current) => current + SILHOUETTE_WRONG_PENALTY_MS);
     }
@@ -1474,7 +1629,10 @@ export default function App(): ReactElement {
     setSelectedAnswer("");
     setNotice({
       tone: "error",
-      text: `こうかはいまひとつ！${selectedChoice ? ` ${selectedChoice.label}ではなさそうです。` : " 別の選択肢を狙いましょう。"}${scoreLoss > 0 ? `-${scoreLoss}pt` : ""}${penaltyText}`,
+      text:
+        round.difficulty === "silhouette"
+          ? `こうかはいまひとつ！${selectedChoice ? ` ${selectedChoice.label}ではなさそうです。` : " 別の選択肢を狙いましょう。"} +2秒`
+          : `こうかはいまひとつ！${selectedChoice ? ` ${selectedChoice.label}ではなさそうです。` : " 別の選択肢を狙いましょう。"}-${round.score - nextRound.score}pt`,
     });
   }
 
@@ -1554,19 +1712,17 @@ export default function App(): ReactElement {
     void prepareRound(Math.max(questionNumber, 1), usedIds);
   }
 
-  function saveResult() {
+  function buildRankingEntry(): RankingDraft | null {
     if (
-      saved ||
-      status !== "finished" ||
       !difficulty ||
       (difficulty === "professor" && !professorLevel) ||
       (difficulty === "trainer" && !trainerLevel) ||
       (difficulty === "silhouette" && !silhouetteLevel)
     ) {
-      return;
+      return null;
     }
 
-    const entry: RankingEntry = {
+    return {
       difficulty,
       professorLevel: difficulty === "professor" ? professorLevel ?? undefined : undefined,
       trainerLevel: difficulty === "trainer" ? trainerLevel ?? undefined : undefined,
@@ -1577,8 +1733,35 @@ export default function App(): ReactElement {
       elapsedMs: liveElapsedMs,
       completedAt: new Date().toISOString(),
     };
-    setRankings(saveRankingEntry(entry));
-    setSaved(true);
+  }
+
+  async function saveResult() {
+    if (
+      saved || isSaving ||
+      status !== "finished" ||
+      !difficulty
+    ) {
+      return;
+    }
+
+    const entry = buildRankingEntry();
+    if (!entry) {
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      await saveRankingEntry(entry);
+      setSaved(true);
+      setNotice({ tone: "success", text: "記録しました。" });
+      await refreshRankings();
+    } catch {
+      setSaved(false);
+      setNotice({ tone: "error", text: "保存に失敗しました（再試行してください）" });
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -1680,7 +1863,7 @@ export default function App(): ReactElement {
                   onSelectTrainerLevel={handleTrainerLevelSelect}
                 />
               </Panel>
-              <RankingPanel emptyText={rankingEmptyText} entries={activeRanking} modeLabel={activeRankingLabel} />
+              <RankingPanel emptyText={rankingEmptyText} entries={activeRanking} modeLabel={activeRankingLabel} onScopeChange={setRankingScope} scope={rankingScope} />
             </div>
             <UpdateNotes />
             <FutureIdeas />
@@ -1836,7 +2019,7 @@ export default function App(): ReactElement {
                     />
                     <input
                       className="min-h-12 w-full rounded-2xl border border-stone-300 bg-white px-11 text-base font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-900/10 disabled:bg-stone-100"
-                      disabled={saved}
+                      disabled={saved || isSaving}
                       id="playerName"
                       maxLength={24}
                       onChange={(event) => setPlayerName(event.target.value)}
@@ -1844,22 +2027,43 @@ export default function App(): ReactElement {
                       value={playerName}
                     />
                   </div>
-                  <IconButton disabled={saved} icon={FloppyDisk} onClick={saveResult}>
-                    {saved ? "記録済み" : "記録する"}
+                  <IconButton disabled={saved || isSaving} icon={FloppyDisk} onClick={saveResult}>
+                    {saved ? "記録済み" : isSaving ? "保存中..." : "記録する"}
                   </IconButton>
+                </div>
+                <div className="mt-3">
+                  <NoticeBox notice={notice} />
                 </div>
               </div>
 
-              <div className="mt-8 flex flex-wrap gap-3">
-                <IconButton icon={ArrowClockwise} onClick={startGame} variant="secondary">
-                  同じ道をもう一度
-                </IconButton>
-                <IconButton icon={Shield} onClick={returnHome} variant="ghost">
-                  研究所へ戻る
-                </IconButton>
+              <div className="mt-8 space-y-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.15em] text-stone-500">SHARE IMAGE</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    {sharePreviewUrl ? (
+                      <img alt="共有画像プレビュー" className="h-24 w-44 rounded-lg border border-stone-300 object-cover" src={sharePreviewUrl} />
+                    ) : (
+                      <div className="grid h-24 w-44 place-items-center rounded-lg border border-dashed border-stone-300 text-xs font-bold text-stone-500">
+                        未生成
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <IconButton disabled={shareBusy} icon={ShareNetwork} onClick={handleShare}>
+                    {shareBusy ? "生成中..." : "シェア"}
+                  </IconButton>
+                  <IconButton icon={ArrowClockwise} onClick={startGame} variant="secondary">
+                    同じ道をもう一度
+                  </IconButton>
+                  <IconButton icon={Shield} onClick={returnHome} variant="ghost">
+                    研究所へ戻る
+                  </IconButton>
+                </div>
               </div>
             </Panel>
-            <RankingPanel entries={activeRanking} modeLabel={activeModeName} />
+            <RankingPanel entries={activeRanking} modeLabel={activeModeName} onScopeChange={setRankingScope} scope={rankingScope} />
           </div>
         )}
       </div>
