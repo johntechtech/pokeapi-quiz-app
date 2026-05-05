@@ -18,13 +18,17 @@
 
 html {
   min-width: 320px;
+  max-width: 100%;
+  overflow-x: hidden;
   background: #f6f1e8;
 }
 
 body {
   min-width: 320px;
+  max-width: 100%;
   min-height: 100dvh;
   margin: 0;
+  overflow-x: hidden;
 }
 
 button,
@@ -951,12 +955,15 @@ button:hover .mode-pokemon img {
 
   .filter-tab-list {
     display: flex;
+    max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
-    padding: 0.3rem;
-    scroll-padding-inline: 0.3rem;
-    scroll-snap-type: x proximity;
+    padding: 0.32rem;
+    scroll-padding-inline: 0.32rem;
+    scroll-snap-type: x mandatory;
     scrollbar-width: none;
+    touch-action: pan-x;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -966,54 +973,32 @@ button:hover .mode-pokemon img {
 
   .filter-tab-button {
     flex: 0 0 auto;
-    min-width: 5.1rem;
+    min-width: 5.35rem;
+    min-height: 2.75rem;
     scroll-snap-align: start;
   }
 
   .filter-tab-panel {
-    min-height: 13.5rem;
+    min-height: 0;
   }
 
   .generation-options,
-  .filter-toggle-grid,
-  .filter-chip-grid,
-  .filter-swatch-grid {
-    display: flex;
-    max-width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    padding: 0 0 0.35rem;
-    scroll-padding-inline: 0.1rem;
-    scroll-snap-type: x proximity;
-    scrollbar-width: thin;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .generation-options,
-  .filter-toggle-grid,
-  .filter-swatch-grid {
-    flex-wrap: nowrap;
+  .filter-toggle-grid {
+    grid-template-columns: 1fr;
   }
 
   .filter-chip-grid {
-    flex-wrap: nowrap;
-  }
-
-  .generation-option,
-  .filter-toggle-option {
-    flex: 0 0 min(16.75rem, 78vw);
-    scroll-snap-align: start;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .filter-chip {
-    flex: 0 0 auto;
-    min-width: 5.35rem;
-    scroll-snap-align: start;
+    min-width: 0;
+    width: 100%;
   }
 
-  .filter-swatch-button {
-    flex: 0 0 5.45rem;
-    scroll-snap-align: start;
+  .filter-swatch-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .filter-group-heading {
