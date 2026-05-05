@@ -48,6 +48,21 @@ import {
   visibleClues,
 } from "./lib/quiz";
 import {
+  countGenerationPokemon,
+  defaultPokemonFilterState,
+  filterSpeciesIds,
+  formatPokemonFilterSummary,
+  generationOptions,
+  kanaRowOptions,
+  pokemonColorOptions,
+  pokemonTypeOptions,
+  type GenerationId,
+  type KanaRow,
+  type PokemonColorName,
+  type PokemonFilterState,
+  type PokemonTypeName,
+} from "./lib/pokemonFilters";
+import {
   fetchRankings,
   getAuthenticatedUser,
   getRankingKey,
@@ -73,15 +88,12 @@ type Notice = { tone: "success" | "error" | "info"; text: string } | null;
 type LastAnswer = { correct: boolean; score: number; answer: string; detail?: string };
 type IconComponent = React.ComponentType<IconProps>;
 type HomeModePokemon = { id: number; name: string; type: string; note: string };
-type GenerationId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
-
-interface GenerationOption {
-  id: GenerationId;
-  label: string;
-  games: string;
-  start: number;
-  end: number;
-}
+type BooleanFilterKey =
+  | "starterOnly"
+  | "legendaryOrMythicalOnly"
+  | "baseStat600PlusOnly"
+  | "megaEvolutionOnly"
+  | "popularOnly";
 
 const difficultyIcons: Record<Difficulty, IconComponent> = {
   kids: BookOpen,
@@ -109,20 +121,6 @@ const loadingMessages = [
   "図鑑のページをめくっています。",
   "モンスターボールを磨いています。",
 ];
-
-const generationOptions: GenerationOption[] = [
-  { id: 1, label: "第1世代", games: "赤・緑、青、ピカチュウ", start: 1, end: 151 },
-  { id: 2, label: "第2世代", games: "金・銀、クリスタル", start: 152, end: 251 },
-  { id: 3, label: "第3世代", games: "ルビー・サファイア、エメラルド", start: 252, end: 386 },
-  { id: 4, label: "第4世代", games: "ダイヤモンド・パール、プラチナ", start: 387, end: 493 },
-  { id: 5, label: "第5世代", games: "ブラック・ホワイト、ブラック2・ホワイト2", start: 494, end: 649 },
-  { id: 6, label: "第6世代", games: "X・Y", start: 650, end: 721 },
-  { id: 7, label: "第7世代", games: "サン・ムーン、ウルトラサン・ウルトラムーン", start: 722, end: 809 },
-  { id: 8, label: "第8世代", games: "ソード・シールド、LEGENDS アルセウス", start: 810, end: 905 },
-  { id: 9, label: "第9世代", games: "スカーレット・バイオレット", start: 906, end: 1025 },
-];
-
-const allGenerationIds = generationOptions.map((generation) => generation.id);
 
 const modePokemonPools: Record<Difficulty, HomeModePokemon[]> = {
   kids: [
@@ -152,6 +150,18 @@ const modePokemonPools: Record<Difficulty, HomeModePokemon[]> = {
   ],
 };
 
+const booleanFilterOptions: Array<{
+  key: BooleanFilterKey;
+  label: string;
+  description: string;
+}> = [
+  { key: "starterOnly", label: "御三家", description: "最初の3匹と進化系" },
+  { key: "legendaryOrMythicalOnly", label: "伝説・幻", description: "伝説または幻のポケモン" },
+  { key: "baseStat600PlusOnly", label: "種族値600以上", description: "通常フォルムの合計値" },
+  { key: "megaEvolutionOnly", label: "メガシンカ", description: "メガ可能な進化系" },
+  { key: "popularOnly", label: "人気100", description: "固定リストの100匹" },
+];
+
 function officialArtworkUrl(id: number): string {
   return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
 }
@@ -162,25 +172,6 @@ function pickModePokemon(): Record<Difficulty, HomeModePokemon> {
     result[difficulty] = pool[Math.floor(Math.random() * pool.length)];
     return result;
   }, {} as Record<Difficulty, HomeModePokemon>);
-}
-
-function countGenerationPokemon(generation: GenerationOption): number {
-  return generation.end - generation.start + 1;
-}
-
-function speciesIdsForGenerations(selectedIds: GenerationId[]): number[] {
-  const selected = new Set(selectedIds);
-
-  return generationOptions.flatMap((generation) => {
-    if (!selected.has(generation.id)) {
-      return [];
-    }
-
-    return Array.from(
-      { length: countGenerationPokemon(generation) },
-      (_, index) => generation.start + index,
-    );
-  });
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -481,23 +472,34 @@ function DifficultySelector({
   );
 }
 
-function GenerationSelector({
+function PokemonFilterSelector({
   isOpen,
-  selectedIds,
+  filters,
   onToggle,
+  onToggleBooleanFilter,
+  onToggleType,
+  onToggleColor,
+  onToggleKanaRow,
   onToggleOpen,
 }: {
   isOpen: boolean;
-  selectedIds: GenerationId[];
+  filters: PokemonFilterState;
   onToggle: (generationId: GenerationId) => void;
+  onToggleBooleanFilter: (key: BooleanFilterKey) => void;
+  onToggleType: (typeName: PokemonTypeName) => void;
+  onToggleColor: (colorName: PokemonColorName) => void;
+  onToggleKanaRow: (kanaRow: KanaRow) => void;
   onToggleOpen: () => void;
 }): ReactElement {
-  const selected = new Set(selectedIds);
+  const selectedGenerations = new Set(filters.generationIds);
+  const selectedTypes = new Set(filters.typeNamesApi);
+  const selectedColors = new Set(filters.colorNames);
+  const selectedKanaRows = new Set(filters.kanaRows);
 
   return (
     <section className="generation-selector" aria-labelledby="generation-selector-title">
       <button
-        aria-controls="generation-options"
+        aria-controls="pokemon-filter-options"
         aria-expanded={isOpen}
         className="generation-accordion-button"
         id="generation-selector-title"
@@ -505,34 +507,142 @@ function GenerationSelector({
         type="button"
       >
         <span>
-          <strong>探す地方をカスタマイズ</strong>
-          <small>複数の地方をまたいで探せます</small>
+          <strong>探す条件をカスタマイズ</strong>
+          <small>地方・タイプ・色などで草むらを絞れます</small>
         </span>
         <CaretDown aria-hidden className="generation-accordion-icon" size={20} weight="bold" />
       </button>
 
       {isOpen && (
-        <div className="generation-options" id="generation-options">
-          {generationOptions.map((generation) => {
-            const checked = selected.has(generation.id);
+        <div className="pokemon-filter-options" id="pokemon-filter-options">
+          <div className="filter-group">
+            <div className="filter-group-heading">
+              <strong>地方</strong>
+              <span>複数の地方をまたいで探せます</span>
+            </div>
+            <div className="generation-options">
+              {generationOptions.map((generation) => {
+                const checked = selectedGenerations.has(generation.id);
 
-            return (
-              <label className={cx("generation-option", checked && "is-active")} key={generation.id}>
-                <input
-                  checked={checked}
-                  onChange={() => onToggle(generation.id)}
-                  type="checkbox"
-                />
-                <span className="generation-option-box" aria-hidden="true" />
-                <span className="generation-option-text">
-                  <strong>
-                    {generation.label}：{generation.games}
-                  </strong>
-                  <span>{countGenerationPokemon(generation)}匹</span>
-                </span>
-              </label>
-            );
-          })}
+                return (
+                  <label className={cx("generation-option", checked && "is-active")} key={generation.id}>
+                    <input
+                      checked={checked}
+                      onChange={() => onToggle(generation.id)}
+                      type="checkbox"
+                    />
+                    <span className="generation-option-box" aria-hidden="true" />
+                    <span className="generation-option-text">
+                      <strong>
+                        {generation.label}：{generation.games}
+                      </strong>
+                      <span>{countGenerationPokemon(generation)}匹</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="filter-group">
+            <div className="filter-group-heading">
+              <strong>カテゴリ</strong>
+              <span>選んだカテゴリをすべて満たす候補だけ出ます</span>
+            </div>
+            <div className="filter-toggle-grid">
+              {booleanFilterOptions.map((option) => {
+                const checked = filters[option.key];
+
+                return (
+                  <label className={cx("generation-option filter-toggle-option", checked && "is-active")} key={option.key}>
+                    <input checked={checked} onChange={() => onToggleBooleanFilter(option.key)} type="checkbox" />
+                    <span className="generation-option-box" aria-hidden="true" />
+                    <span className="generation-option-text">
+                      <strong>{option.label}</strong>
+                      <span>{option.description}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="filter-group">
+            <div className="filter-group-heading">
+              <strong>タイプ</strong>
+              <span>複数選択時はいずれかのタイプを持つポケモン</span>
+            </div>
+            <div className="filter-chip-grid filter-chip-grid-types">
+              {pokemonTypeOptions.map((option) => {
+                const active = selectedTypes.has(option.apiName);
+
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={cx("filter-chip", active && "is-active")}
+                    key={option.apiName}
+                    onClick={() => onToggleType(option.apiName)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="filter-group">
+            <div className="filter-group-heading">
+              <strong>ポケモンの色</strong>
+              <span>図鑑上の体色で絞ります</span>
+            </div>
+            <div className="filter-swatch-grid">
+              {pokemonColorOptions.map((option) => {
+                const active = selectedColors.has(option.apiName);
+
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={cx("filter-swatch-button", active && "is-active")}
+                    key={option.apiName}
+                    onClick={() => onToggleColor(option.apiName)}
+                    type="button"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="filter-swatch"
+                      style={{ backgroundColor: option.swatch }}
+                    />
+                    <span>{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="filter-group">
+            <div className="filter-group-heading">
+              <strong>五十音</strong>
+              <span>濁音・半濁音は同じ行に含めます</span>
+            </div>
+            <div className="filter-chip-grid filter-chip-grid-kana">
+              {kanaRowOptions.map((option) => {
+                const active = selectedKanaRows.has(option.id);
+
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={cx("filter-chip", active && "is-active")}
+                    key={option.id}
+                    onClick={() => onToggleKanaRow(option.id)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </section>
@@ -584,6 +694,9 @@ function RankingPanel({
                 <p className="text-xs text-stone-500">
                   {isSilhouetteRanking ? `タイム ${formatElapsed(entry.elapsedMs)}` : `${formatElapsed(entry.elapsedMs)} / 図鑑メモ ${entry.hintsUsed}`}
                 </p>
+                {entry.customConditionSummary && (
+                  <p className="ranking-custom-condition">カスタム: {entry.customConditionSummary}</p>
+                )}
               </div>
               <div className="text-right">
                 <p className="font-mono text-lg font-black text-stone-950">
@@ -1189,7 +1302,7 @@ export default function App(): ReactElement {
   const [viewerUserId, setViewerUserId] = useState<string | null>(null);
   const [lastAnswer, setLastAnswer] = useState<LastAnswer | null>(null);
   const [modePokemon, setModePokemon] = useState(pickModePokemon);
-  const [selectedGenerationIds, setSelectedGenerationIds] = useState<GenerationId[]>(allGenerationIds);
+  const [pokemonFilters, setPokemonFilters] = useState(defaultPokemonFilterState);
   const [generationAccordionOpen, setGenerationAccordionOpen] = useState(false);
   const [startTooltipVisible, setStartTooltipVisible] = useState(false);
   const [sharePreviewUrl, setSharePreviewUrl] = useState<string | null>(null);
@@ -1197,8 +1310,12 @@ export default function App(): ReactElement {
 
   const currentClues = useMemo(() => (round ? visibleClues(round) : []), [round]);
   const candidateSpeciesIds = useMemo(
-    () => speciesIdsForGenerations(selectedGenerationIds),
-    [selectedGenerationIds],
+    () => filterSpeciesIds(pokemonFilters),
+    [pokemonFilters],
+  );
+  const customConditionSummary = useMemo(
+    () => formatPokemonFilterSummary(pokemonFilters),
+    [pokemonFilters],
   );
   const liveElapsedMs =
     elapsedMs + (status === "playing" && roundStartedAt ? Math.max(0, stopwatchTick - roundStartedAt) : 0);
@@ -1237,10 +1354,12 @@ export default function App(): ReactElement {
   const startDisabledReason = !hasSelectedModeLevel
     ? "冒険するモードとレベルを選んでください"
     : candidateSpeciesIds.length === 0
-      ? "探す地方を1つ以上選んでください"
-      : "";
+      ? "探す条件に合うポケモンがいません"
+      : candidateSpeciesIds.length < totalQuestions
+        ? `候補が${candidateSpeciesIds.length}匹です。${totalQuestions}問には${totalQuestions}匹以上必要です`
+        : "";
   const isQuizActive = (status === "playing" || status === "answered") && round !== null && difficulty !== null;
-  const canStartGame = hasSelectedModeLevel && candidateSpeciesIds.length > 0;
+  const canStartGame = hasSelectedModeLevel && candidateSpeciesIds.length >= totalQuestions;
   const shouldShowStopwatch = difficulty === "silhouette" && status !== "idle";
 
   useEffect(() => {
@@ -1541,13 +1660,52 @@ export default function App(): ReactElement {
     clearSharePreview();
   }
 
-  function toggleGeneration(generationId: GenerationId) {
+  function toggleFilterArrayValue<T>(items: T[], value: T, sortValues?: (left: T, right: T) => number): T[] {
+    const nextItems = items.includes(value)
+      ? items.filter((item) => item !== value)
+      : [...items, value];
+
+    return sortValues ? nextItems.sort(sortValues) : nextItems;
+  }
+
+  function updatePokemonFilters(updater: (current: PokemonFilterState) => PokemonFilterState) {
     setStartTooltipVisible(false);
-    setSelectedGenerationIds((current) =>
-      current.includes(generationId)
-        ? current.filter((id) => id !== generationId)
-        : [...current, generationId].sort((a, b) => a - b),
-    );
+    setPokemonFilters(updater);
+  }
+
+  function toggleGeneration(generationId: GenerationId) {
+    updatePokemonFilters((current) => ({
+      ...current,
+      generationIds: toggleFilterArrayValue(current.generationIds, generationId, (a, b) => a - b),
+    }));
+  }
+
+  function toggleBooleanFilter(key: BooleanFilterKey) {
+    updatePokemonFilters((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }
+
+  function toggleTypeFilter(typeName: PokemonTypeName) {
+    updatePokemonFilters((current) => ({
+      ...current,
+      typeNamesApi: toggleFilterArrayValue(current.typeNamesApi, typeName),
+    }));
+  }
+
+  function toggleColorFilter(colorName: PokemonColorName) {
+    updatePokemonFilters((current) => ({
+      ...current,
+      colorNames: toggleFilterArrayValue(current.colorNames, colorName),
+    }));
+  }
+
+  function toggleKanaRowFilter(kanaRow: KanaRow) {
+    updatePokemonFilters((current) => ({
+      ...current,
+      kanaRows: toggleFilterArrayValue(current.kanaRows, kanaRow),
+    }));
   }
 
   function handleHint() {
@@ -1732,6 +1890,7 @@ export default function App(): ReactElement {
       hintsUsed: totalHints,
       elapsedMs: liveElapsedMs,
       completedAt: new Date().toISOString(),
+      customConditionSummary,
     };
   }
 
@@ -1840,16 +1999,29 @@ export default function App(): ReactElement {
                     <h2 className="mt-2 text-2xl font-black tracking-tight text-stone-950">冒険ルートを選ぶ</h2>
                   </div>
                 </div>
-                <div className="generation-count" aria-live="polite">
-                  <span>草むら</span>
+                <div
+                  className={cx(
+                    "generation-count",
+                    hasSelectedModeLevel && candidateSpeciesIds.length < totalQuestions && "is-warning",
+                  )}
+                  aria-live="polite"
+                >
+                  <span>候補</span>
                   <strong>{candidateSpeciesIds.length}</strong>
                   <span>匹</span>
+                  {hasSelectedModeLevel && (
+                    <small>必要 {totalQuestions}匹</small>
+                  )}
                 </div>
-                <GenerationSelector
+                <PokemonFilterSelector
+                  filters={pokemonFilters}
                   isOpen={generationAccordionOpen}
                   onToggle={toggleGeneration}
+                  onToggleBooleanFilter={toggleBooleanFilter}
+                  onToggleColor={toggleColorFilter}
+                  onToggleKanaRow={toggleKanaRowFilter}
                   onToggleOpen={() => setGenerationAccordionOpen((current) => !current)}
-                  selectedIds={selectedGenerationIds}
+                  onToggleType={toggleTypeFilter}
                 />
                 <DifficultySelector
                   modePokemon={modePokemon}
@@ -2001,6 +2173,11 @@ export default function App(): ReactElement {
                     {formatModeName(difficulty, professorLevel, trainerLevel, silhouetteLevel)}の調査完了。図鑑メモ {totalHints} 回、
                     タイム {formatElapsed(liveElapsedMs)}。
                   </p>
+                  {customConditionSummary && (
+                    <p className="mt-3 rounded-2xl border border-stone-300 bg-white px-4 py-3 text-xs font-bold leading-5 text-stone-600">
+                      カスタム: {customConditionSummary}
+                    </p>
+                  )}
                 </div>
                 <Trophy aria-hidden className="text-[#d0a331]" size={54} weight="fill" />
               </div>

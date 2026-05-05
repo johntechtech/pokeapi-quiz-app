@@ -254,6 +254,10 @@ function normalizeEntry(entry: StoredRankingEntry, key: RankingKey): RankingEntr
     hintsUsed: typeof entry.hintsUsed === "number" ? entry.hintsUsed : 0,
     elapsedMs: entry.elapsedMs,
     completedAt: entry.completedAt,
+    customConditionSummary:
+      typeof entry.customConditionSummary === "string" && entry.customConditionSummary.trim()
+        ? entry.customConditionSummary.trim()
+        : undefined,
   };
 }
 
@@ -263,6 +267,7 @@ function normalizeEntryForSave(entry: RankingDraft, user: AuthUser): RankingEntr
     userId: user.id,
     displayName: user.displayName,
     playerName: entry.playerName.trim() || DEFAULT_TRAINER_NAME,
+    customConditionSummary: entry.customConditionSummary?.trim() || undefined,
   };
 
   if (entry.difficulty === "professor") {

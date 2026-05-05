@@ -146,4 +146,5 @@ export interface RankingEntry {
   hintsUsed: number;
   elapsedMs: number;
   completedAt: string;
+  customConditionSummary?: string;
 }

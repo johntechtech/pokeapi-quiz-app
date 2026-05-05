@@ -797,14 +797,31 @@ export async function fetchRandomPokemonQuizData(
   options?: FetchPokemonQuizDataOptions,
 ): Promise<PokemonQuizData> {
   const candidateSpeciesIds = options?.candidateSpeciesIds?.filter((id) => Number.isInteger(id) && id > 0);
-  const count = candidateSpeciesIds?.length ? candidateSpeciesIds.length : await getSpeciesCount();
   const excluded = new Set(excludedIds);
   const maxAttempts = 16;
 
+  if (candidateSpeciesIds?.length) {
+    const availableCandidateIds = candidateSpeciesIds.filter((id) => !excluded.has(id));
+    if (availableCandidateIds.length === 0) {
+      throw new Error("探す条件に合うポケモンをすべて見つけました。条件を広げてください。");
+    }
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const candidateId = availableCandidateIds[Math.floor(Math.random() * availableCandidateIds.length)];
+      try {
+        return await fetchPokemonQuizData(candidateId, options);
+      } catch {
+        // Some edge species can miss a resource. Try another species.
+      }
+    }
+
+    const fallbackId = availableCandidateIds[Math.floor(Math.random() * availableCandidateIds.length)];
+    return fetchPokemonQuizData(fallbackId, options);
+  }
+
+  const count = await getSpeciesCount();
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const candidateId = candidateSpeciesIds?.length
-      ? candidateSpeciesIds[Math.floor(Math.random() * candidateSpeciesIds.length)]
-      : Math.floor(Math.random() * count) + 1;
+    const candidateId = Math.floor(Math.random() * count) + 1;
     if (excluded.has(candidateId) && excluded.size < count) {
       continue;
     }
@@ -816,8 +833,6 @@ export async function fetchRandomPokemonQuizData(
     }
   }
 
-  const fallbackId = candidateSpeciesIds?.length
-    ? candidateSpeciesIds[Math.floor(Math.random() * candidateSpeciesIds.length)]
-    : Math.floor(Math.random() * count) + 1;
+  const fallbackId = Math.floor(Math.random() * count) + 1;
   return fetchPokemonQuizData(fallbackId, options);
 }
