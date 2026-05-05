@@ -94,6 +94,7 @@ type BooleanFilterKey =
   | "baseStat600PlusOnly"
   | "megaEvolutionOnly"
   | "popularOnly";
+type FilterTabId = "region" | "category" | "type" | "color" | "kana";
 
 const difficultyIcons: Record<Difficulty, IconComponent> = {
   kids: BookOpen,
@@ -160,6 +161,14 @@ const booleanFilterOptions: Array<{
   { key: "baseStat600PlusOnly", label: "種族値600以上", description: "通常フォルムの合計値" },
   { key: "megaEvolutionOnly", label: "メガシンカ", description: "メガ可能な進化系" },
   { key: "popularOnly", label: "人気100", description: "固定リストの100匹" },
+];
+
+const filterTabOptions: Array<{ id: FilterTabId; label: string }> = [
+  { id: "region", label: "地方" },
+  { id: "category", label: "分類" },
+  { id: "type", label: "タイプ" },
+  { id: "color", label: "色" },
+  { id: "kana", label: "五十音" },
 ];
 
 function officialArtworkUrl(id: number): string {
@@ -491,10 +500,32 @@ function PokemonFilterSelector({
   onToggleKanaRow: (kanaRow: KanaRow) => void;
   onToggleOpen: () => void;
 }): ReactElement {
+  const [activeTab, setActiveTab] = useState<FilterTabId>("region");
   const selectedGenerations = new Set(filters.generationIds);
   const selectedTypes = new Set(filters.typeNamesApi);
   const selectedColors = new Set(filters.colorNames);
   const selectedKanaRows = new Set(filters.kanaRows);
+  const activeCategoryCount = booleanFilterOptions.filter((option) => filters[option.key]).length;
+
+  function tabBadge(tabId: FilterTabId): string {
+    if (tabId === "region") {
+      return selectedGenerations.size === generationOptions.length ? "全" : String(selectedGenerations.size);
+    }
+
+    if (tabId === "category") {
+      return activeCategoryCount ? String(activeCategoryCount) : "0";
+    }
+
+    if (tabId === "type") {
+      return selectedTypes.size ? String(selectedTypes.size) : "0";
+    }
+
+    if (tabId === "color") {
+      return selectedColors.size ? String(selectedColors.size) : "0";
+    }
+
+    return selectedKanaRows.size ? String(selectedKanaRows.size) : "0";
+  }
 
   return (
     <section className="generation-selector" aria-labelledby="generation-selector-title">
@@ -515,7 +546,35 @@ function PokemonFilterSelector({
 
       {isOpen && (
         <div className="pokemon-filter-options" id="pokemon-filter-options">
-          <div className="filter-group">
+          <div className="filter-tab-list" role="tablist" aria-label="探す条件の種類">
+            {filterTabOptions.map((tab) => {
+              const active = activeTab === tab.id;
+
+              return (
+                <button
+                  aria-controls={`pokemon-filter-panel-${tab.id}`}
+                  aria-selected={active}
+                  className={cx("filter-tab-button", active && "is-active")}
+                  id={`pokemon-filter-tab-${tab.id}`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  role="tab"
+                  type="button"
+                >
+                  <span>{tab.label}</span>
+                  <strong>{tabBadge(tab.id)}</strong>
+                </button>
+              );
+            })}
+          </div>
+
+          {activeTab === "region" && (
+          <div
+            aria-labelledby="pokemon-filter-tab-region"
+            className="filter-group filter-tab-panel"
+            id="pokemon-filter-panel-region"
+            role="tabpanel"
+          >
             <div className="filter-group-heading">
               <strong>地方</strong>
               <span>複数の地方をまたいで探せます</span>
@@ -543,8 +602,15 @@ function PokemonFilterSelector({
               })}
             </div>
           </div>
+          )}
 
-          <div className="filter-group">
+          {activeTab === "category" && (
+          <div
+            aria-labelledby="pokemon-filter-tab-category"
+            className="filter-group filter-tab-panel"
+            id="pokemon-filter-panel-category"
+            role="tabpanel"
+          >
             <div className="filter-group-heading">
               <strong>カテゴリ</strong>
               <span>選んだカテゴリをすべて満たす候補だけ出ます</span>
@@ -566,8 +632,15 @@ function PokemonFilterSelector({
               })}
             </div>
           </div>
+          )}
 
-          <div className="filter-group">
+          {activeTab === "type" && (
+          <div
+            aria-labelledby="pokemon-filter-tab-type"
+            className="filter-group filter-tab-panel"
+            id="pokemon-filter-panel-type"
+            role="tabpanel"
+          >
             <div className="filter-group-heading">
               <strong>タイプ</strong>
               <span>複数選択時はいずれかのタイプを持つポケモン</span>
@@ -590,8 +663,15 @@ function PokemonFilterSelector({
               })}
             </div>
           </div>
+          )}
 
-          <div className="filter-group">
+          {activeTab === "color" && (
+          <div
+            aria-labelledby="pokemon-filter-tab-color"
+            className="filter-group filter-tab-panel"
+            id="pokemon-filter-panel-color"
+            role="tabpanel"
+          >
             <div className="filter-group-heading">
               <strong>ポケモンの色</strong>
               <span>図鑑上の体色で絞ります</span>
@@ -619,8 +699,15 @@ function PokemonFilterSelector({
               })}
             </div>
           </div>
+          )}
 
-          <div className="filter-group">
+          {activeTab === "kana" && (
+          <div
+            aria-labelledby="pokemon-filter-tab-kana"
+            className="filter-group filter-tab-panel"
+            id="pokemon-filter-panel-kana"
+            role="tabpanel"
+          >
             <div className="filter-group-heading">
               <strong>五十音</strong>
               <span>濁音・半濁音は同じ行に含めます</span>
@@ -643,6 +730,7 @@ function PokemonFilterSelector({
               })}
             </div>
           </div>
+          )}
         </div>
       )}
     </section>

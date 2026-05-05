@@ -210,9 +210,94 @@ input:disabled {
 }
 
 .pokemon-filter-options {
-  display: grid;
-  gap: 1rem;
   margin-top: 0.75rem;
+  border: 1px solid #e7e5e4;
+  border-radius: 1.15rem;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 0.7rem;
+}
+
+.filter-tab-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+  border: 1px solid #e7e5e4;
+  border-radius: 0.95rem;
+  background: #f7f2e9;
+  padding: 0.35rem;
+}
+
+.filter-tab-button {
+  display: flex;
+  min-width: 0;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  border: 1px solid transparent;
+  border-radius: 0.78rem;
+  background: transparent;
+  color: #57534e;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.filter-tab-button:hover {
+  border-color: #d6d3d1;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.filter-tab-button:active {
+  transform: translateY(1px);
+}
+
+.filter-tab-button.is-active {
+  border-color: #22201d;
+  background: #ffffff;
+  color: #1c1917;
+  box-shadow: 0 10px 22px -20px rgba(38, 32, 24, 0.62);
+}
+
+.filter-tab-button span,
+.filter-tab-button strong {
+  display: block;
+}
+
+.filter-tab-button span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-tab-button strong {
+  min-width: 1.35rem;
+  border-radius: 999px;
+  background: #e7e5e4;
+  padding: 0.22rem 0.38rem;
+  color: #57534e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.68rem;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+}
+
+.filter-tab-button.is-active strong {
+  background: #f2bd45;
+  color: #22201d;
+}
+
+.filter-tab-panel {
+  margin-top: 0.75rem;
+  min-height: 10.35rem;
 }
 
 .filter-group {
@@ -854,6 +939,30 @@ button:hover .mode-pokemon img {
 
   .generation-options {
     grid-template-columns: 1fr;
+  }
+
+  .pokemon-filter-options {
+    padding: 0.55rem;
+  }
+
+  .filter-tab-list {
+    display: flex;
+    overflow-x: auto;
+    padding: 0.3rem;
+    scrollbar-width: none;
+  }
+
+  .filter-tab-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-tab-button {
+    flex: 0 0 auto;
+    min-width: 5.1rem;
+  }
+
+  .filter-tab-panel {
+    min-height: 13.5rem;
   }
 
   .filter-group-heading {
