@@ -31,6 +31,11 @@ body {
   overflow-x: hidden;
 }
 
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 button,
 input {
   font: inherit;
@@ -954,28 +959,23 @@ button:hover .mode-pokemon img {
   }
 
   .filter-tab-list {
-    display: flex;
-    max-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    padding: 0.32rem;
-    scroll-padding-inline: 0.32rem;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-    touch-action: pan-x;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .filter-tab-list::-webkit-scrollbar {
-    display: none;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    overflow: visible;
+    padding: 0.4rem;
   }
 
   .filter-tab-button {
-    flex: 0 0 auto;
-    min-width: 5.35rem;
-    min-height: 2.75rem;
-    scroll-snap-align: start;
+    min-height: 3rem;
+    justify-content: space-between;
+    padding-inline: 0.8rem;
+    text-align: left;
+    width: 100%;
+  }
+
+  .filter-tab-button span {
+    white-space: normal;
   }
 
   .filter-tab-panel {
